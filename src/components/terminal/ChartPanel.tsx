@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useChart } from '@/hooks/useChart';
 import { useTradeOverlays } from '@/hooks/useTradeOverlays';
@@ -13,9 +13,13 @@ export function ChartPanel() {
   // Latest tick for this symbol — drives both candle patching and overlay PnL updates
   const latestTick = useTerminalStore((s) => s.livePrices[selectedSymbol] ?? null);
 
-  // Positions for the currently viewed symbol — used by overlay hook
-  const symbolPositions = useTerminalStore((s) =>
-    s.positions.filter((p) => p.symbol === selectedSymbol),
+  // Select the raw positions array (stable ref when unchanged), then derive
+  // the per-symbol slice with useMemo to avoid creating a new array on every
+  // getSnapshot call (which would cause an infinite useSyncExternalStore loop).
+  const allPositions = useTerminalStore((s) => s.positions);
+  const symbolPositions = useMemo(
+    () => allPositions.filter((p) => p.symbol === selectedSymbol),
+    [allPositions, selectedSymbol],
   );
 
   const { containerRef, seriesRef, isLoading, error, candleCount, lastTickTime } = useChart(
