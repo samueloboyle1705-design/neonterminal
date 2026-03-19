@@ -22,3 +22,6 @@ export type { BybitKlineItem, BybitRawTicker, BybitTickerEnvelope } from './norm
 export { BybitStream } from './stream';
 
 export { BybitProvider, getBybitProvider, destroyBybitProvider } from './bybit';
+
+// React hooks — client-only; do not import in server components.
+export { useTicker, useTickerStream } from './hooks';
