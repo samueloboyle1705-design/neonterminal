@@ -6,13 +6,19 @@
  * Responsibilities:
  *  - Creates the chart once on mount; destroys it cleanly on unmount.
  *  - Fetches historical candles from Bybit whenever `symbol` or `timeframe`
- *    changes, cancels in-flight fetches to avoid stale updates.
- *  - Exposes loading + error state for overlay UI.
- *  - Responsive: uses chart's built-in `autoSize` (ResizeObserver-based).
+ *    changes; cancels in-flight fetches to avoid stale updates.
+ *  - Patches the latest candle in real-time via series.update() when
+ *    `latestTick` changes — no series rebuild, no React state churn.
+ *  - Responsive: uses the chart's built-in autoSize (ResizeObserver-based).
  *
- * Usage:
- *   const { containerRef, isLoading, error } = useChart(symbol, timeframe);
- *   return <div ref={containerRef} className="w-full h-full" />;
+ * Three independent effects, in order of priority:
+ *   1. [mount only]          create chart + series; destroy on unmount.
+ *   2. [symbol, timeframe]   fetch historical data; set currentCandleRef.
+ *   3. [latestTick]          patch current candle via series.update().
+ *
+ * Stale-closure strategy:
+ *   chartRef, seriesRef, currentCandleRef, timeframeRef are all React refs.
+ *   Effects read them at execution time — never captured in closures.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -32,7 +38,7 @@ import type {
   CandlestickSeriesPartialOptions,
 } from 'lightweight-charts';
 import { fetchCandles } from '@/lib/marketData';
-import type { DisplayTimeframe } from '@/lib/marketData';
+import type { Candle, DisplayTimeframe, MarketTick } from '@/lib/marketData';
 
 // ── Theme constants — must match globals.css @theme values ──────────────────
 
@@ -56,8 +62,6 @@ const CHART_OPTIONS: DeepPartial<ChartOptions> = {
   layout: {
     background: { type: ColorType.Solid, color: C.bg },
     textColor: C.sub,
-    // GeistMono is loaded as a CSS variable; font-family string must match
-    // what the browser has registered from the Next.js font loader.
     fontFamily: 'var(--font-geist-mono, ui-monospace, monospace)',
     fontSize: 11,
   },
@@ -89,41 +93,143 @@ const CHART_OPTIONS: DeepPartial<ChartOptions> = {
 };
 
 const CANDLE_OPTIONS: CandlestickSeriesPartialOptions = {
-  upColor:        C.green,
-  downColor:      C.red,
-  borderUpColor:  C.green,
-  borderDownColor:C.red,
-  wickUpColor:    C.green,
-  wickDownColor:  C.red,
+  upColor:         C.green,
+  downColor:       C.red,
+  borderUpColor:   C.green,
+  borderDownColor: C.red,
+  wickUpColor:     C.green,
+  wickDownColor:   C.red,
 };
 
 // How many candles to fetch per request (Bybit cap is 1 000)
 const CANDLE_LIMIT = 300;
 
+// ── Timeframe → seconds mapping (for candle bucket calculation) ─────────────
+
+const TIMEFRAME_SECONDS: Record<DisplayTimeframe, number> = {
+  '1m':   60,
+  '5m':   300,
+  '15m':  900,
+  '1h':   3_600,
+  '4h':   14_400,
+  '1d':   86_400,
+};
+
+// ── Pure helper: apply one price tick to the live series ────────────────────
+
+/**
+ * Merges a single MarketTick into the series without rebuilding it.
+ *
+ * Algorithm:
+ *  - Derive the candle bucket the tick belongs to (floor to timeframe boundary).
+ *  - If bucket === current.time  → update H/L/C of the existing candle.
+ *  - If bucket >  current.time  → open a brand-new candle at bucket.
+ *  - If bucket <  current.time  → tick is older than visible data; discard.
+ *
+ * series.update() either mutates the last bar (same time) or appends a new
+ * one (later time).  It never modifies historical bars.
+ *
+ * Wrapped in try/catch because lightweight-charts throws on time-order
+ * violations that can occur during symbol/timeframe transitions.
+ */
+function applyTickToSeries(
+  tick: MarketTick,
+  series: ISeriesApi<'Candlestick'>,
+  currentCandleRef: React.MutableRefObject<Candle | null>,
+  timeframe: DisplayTimeframe,
+): void {
+  const current = currentCandleRef.current;
+  if (!current) return; // data not yet loaded — discard
+
+  const bucketSecs = TIMEFRAME_SECONDS[timeframe];
+  // tick.timestamp is epoch milliseconds (from Bybit WS `ts` field)
+  const tickSecs   = Math.floor(tick.timestamp / 1000);
+  const bucket     = Math.floor(tickSecs / bucketSecs) * bucketSecs;
+  const price      = tick.lastPrice;
+
+  let next: Candle;
+
+  if (bucket === current.time) {
+    // Same candle — extend high/low, move close
+    next = {
+      ...current,
+      high:  Math.max(current.high, price),
+      low:   Math.min(current.low,  price),
+      close: price,
+    };
+  } else if (bucket > current.time) {
+    // New candle period — open fresh bar
+    next = {
+      time:   bucket,
+      open:   price,
+      high:   price,
+      low:    price,
+      close:  price,
+      volume: 0,
+    };
+  } else {
+    // Tick is stale (older than last known candle) — discard
+    return;
+  }
+
+  try {
+    series.update({
+      time:  next.time as UTCTimestamp,
+      open:  next.open,
+      high:  next.high,
+      low:   next.low,
+      close: next.close,
+    });
+    // Mutate the ref in-place — this never triggers a React re-render
+    currentCandleRef.current = next;
+  } catch {
+    // Silently discard: can happen mid-transition when new historical data
+    // is being loaded and the series timeline is temporarily inconsistent.
+  }
+}
+
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export interface UseChartResult {
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  isLoading: boolean;
-  error: string | null;
-  candleCount: number;
+  containerRef:  React.RefObject<HTMLDivElement | null>;
+  isLoading:     boolean;
+  error:         string | null;
+  candleCount:   number;
+  /** Epoch-ms timestamp of the most recent live tick applied to the chart.
+   *  null until the first tick arrives after data loads. */
+  lastTickTime:  number | null;
 }
 
 export function useChart(
-  symbol: string,
-  timeframe: DisplayTimeframe,
+  symbol:      string,
+  timeframe:   DisplayTimeframe,
+  latestTick?: MarketTick | null,
 ): UseChartResult {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Stable refs — mutated in effects, never cause re-renders
-  const chartRef  = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  // ── Stable refs — never trigger re-renders ────────────────────────────────
+  const chartRef         = useRef<IChartApi | null>(null);
+  const seriesRef        = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  /** The last known OHLC for the current time bucket. */
+  const currentCandleRef = useRef<Candle | null>(null);
+  /** Mirrors `timeframe` prop so the tick-handler reads it without closure. */
+  const timeframeRef     = useRef<DisplayTimeframe>(timeframe);
 
-  const [isLoading,   setIsLoading]   = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
-  const [candleCount, setCandleCount] = useState(0);
+  const [isLoading,    setIsLoading]    = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [candleCount,  setCandleCount]  = useState(0);
+  const [lastTickTime, setLastTickTime] = useState<number | null>(null);
 
-  // ── Effect 1: create chart on mount, destroy on unmount ─────────────────
+  // ── Sync timeframe ref whenever prop changes ──────────────────────────────
+  // Must run before Effect 2 (data load) so the tick-handler always sees the
+  // correct bucket size even during the async fetch window.
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+    // Invalidate current candle so stale ticks are discarded while reloading.
+    currentCandleRef.current = null;
+  }, [timeframe]);
+
+  // ── Effect 1: create chart on mount, destroy on unmount ──────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -135,30 +241,32 @@ export function useChart(
     seriesRef.current = series;
 
     return () => {
-      // Remove listeners and DOM canvas; nullify refs before GC
       chart.remove();
       chartRef.current  = null;
       seriesRef.current = null;
     };
   }, []); // intentionally empty — runs once per mount
 
-  // ── Effect 2: load candles whenever symbol or timeframe changes ──────────
+  // ── Effect 2: load historical candles on symbol / timeframe change ────────
   useEffect(() => {
     const series = seriesRef.current;
     const chart  = chartRef.current;
     if (!series || !chart) return;
 
+    // Invalidate the partial-candle tracker so ticks arriving before the new
+    // data finishes loading are silently discarded.
+    currentCandleRef.current = null;
+
     let cancelled = false;
 
     setIsLoading(true);
     setError(null);
+    setLastTickTime(null);
 
     fetchCandles(symbol, timeframe, CANDLE_LIMIT)
       .then((candles) => {
         if (cancelled) return;
 
-        // Map our Candle[] to CandlestickData<UTCTimestamp>[]
-        // time is already epoch seconds — matches UTCTimestamp
         const data: CandlestickData[] = candles.map((c) => ({
           time:  c.time as UTCTimestamp,
           open:  c.open,
@@ -170,6 +278,12 @@ export function useChart(
         series.setData(data);
         chart.timeScale().fitContent();
 
+        // Seed the partial-candle ref with the last fetched candle so
+        // applyTickToSeries has a valid starting point.
+        if (candles.length > 0) {
+          currentCandleRef.current = candles[candles.length - 1];
+        }
+
         setCandleCount(data.length);
         setIsLoading(false);
       })
@@ -180,10 +294,24 @@ export function useChart(
       });
 
     return () => {
-      // Mark the in-flight fetch as stale so its .then() becomes a no-op
       cancelled = true;
+      // Invalidate again in case the fetch completes after a symbol change
+      currentCandleRef.current = null;
     };
   }, [symbol, timeframe]);
 
-  return { containerRef, isLoading, error, candleCount };
+  // ── Effect 3: patch latest candle with live price tick ────────────────────
+  // Runs on every new tick for the selected symbol.
+  // All mutable state is read from refs at execution time — no stale closures.
+  useEffect(() => {
+    if (!latestTick) return;
+
+    const series = seriesRef.current;
+    if (!series) return;
+
+    applyTickToSeries(latestTick, series, currentCandleRef, timeframeRef.current);
+    setLastTickTime(Date.now());
+  }, [latestTick]);
+
+  return { containerRef, isLoading, error, candleCount, lastTickTime };
 }

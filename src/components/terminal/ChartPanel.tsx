@@ -9,25 +9,33 @@ export function ChartPanel() {
   const selectedTimeframe = useTerminalStore((s) => s.selectedTimeframe);
   const setCandlesLoading = useTerminalStore((s) => s.setCandlesLoading);
 
-  const { containerRef, isLoading, error, candleCount } = useChart(
+  // Read the latest tick for the selected symbol directly from the store.
+  // StoreStreamBridge already feeds setLivePrice on every WS tick, so no
+  // extra subscription is needed — we just observe the existing slice.
+  const latestTick = useTerminalStore((s) => s.livePrices[selectedSymbol] ?? null);
+
+  const { containerRef, isLoading, error, candleCount, lastTickTime } = useChart(
     selectedSymbol,
     selectedTimeframe,
+    latestTick,
   );
 
   // Keep the store's candlesLoading flag in sync so other panels
-  // (e.g. a status bar) can react to load state without knowing about the hook.
+  // (e.g. a future status bar) can react to load state.
   useEffect(() => {
     setCandlesLoading(isLoading);
   }, [isLoading, setCandlesLoading]);
+
+  // Whether we've received a live tick in the last 5 seconds.
+  const isLive = lastTickTime !== null && Date.now() - lastTickTime < 5_000;
 
   return (
     <div className="flex-1 relative bg-t-bg overflow-hidden min-h-0">
       {/* ── Chart container ─────────────────────────────────────────────── */}
       {/* lightweight-charts renders a <canvas> directly into this div.    */}
-      {/* `absolute inset-0` ensures it matches the panel exactly.         */}
       <div ref={containerRef} className="absolute inset-0" />
 
-      {/* ── Symbol / timeframe watermark — sits above the chart ─────────── */}
+      {/* ── Top-left watermark: symbol + timeframe ───────────────────────── */}
       <div className="absolute top-3 left-4 flex items-baseline gap-2 pointer-events-none z-10">
         <span className="text-sm font-mono font-semibold text-t-text opacity-40 select-none">
           {selectedSymbol}
@@ -36,6 +44,17 @@ export function ChartPanel() {
           {selectedTimeframe}
         </span>
       </div>
+
+      {/* ── Top-right: LIVE indicator ────────────────────────────────────── */}
+      {/* Visible once the first live tick after data-load has been applied. */}
+      {isLive && (
+        <div className="absolute top-3 right-4 flex items-center gap-1.5 pointer-events-none z-10">
+          <span className="block w-1.5 h-1.5 rounded-full bg-t-green animate-pulse" />
+          <span className="text-xs font-mono text-t-muted uppercase tracking-widest select-none">
+            Live
+          </span>
+        </div>
+      )}
 
       {/* ── Loading overlay ──────────────────────────────────────────────── */}
       {isLoading && (
@@ -61,9 +80,9 @@ export function ChartPanel() {
         </div>
       )}
 
-      {/* ── Candle count badge — bottom right ───────────────────────────── */}
+      {/* ── Bottom-right: candle count ───────────────────────────────────── */}
       {candleCount > 0 && !isLoading && (
-        <div className="absolute bottom-3 right-4 text-xs font-mono text-t-muted opacity-50 pointer-events-none z-10 select-none">
+        <div className="absolute bottom-3 right-4 text-xs font-mono text-t-muted opacity-40 pointer-events-none z-10 select-none">
           {candleCount} candles
         </div>
       )}
