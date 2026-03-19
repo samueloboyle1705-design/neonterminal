@@ -1,7 +1,7 @@
 'use client';
 
 import { useTerminalStore } from '@/stores/terminal-store';
-import { useAccountStore } from '@/stores/account-store';
+import { closeSimulatedPosition } from '@/lib/trading/simulator';
 import type { Position } from '@/types/trading';
 
 function fmtPrice(n: number): string {
@@ -14,8 +14,6 @@ function fmtPnl(n: number): string {
 }
 
 function PositionRow({ position }: { position: Position }) {
-  const closePosition = useTerminalStore((s) => s.closePosition);
-  const addRealizedPnl = useAccountStore((s) => s.addRealizedPnl);
   const isBuy = position.side === 'Buy';
   const pnlPositive = position.unrealizedPnl >= 0;
 
@@ -58,10 +56,7 @@ function PositionRow({ position }: { position: Position }) {
       </td>
       <td className="px-3 py-2">
         <button
-          onClick={() => {
-            closePosition(position.id);
-            addRealizedPnl(position.unrealizedPnl);
-          }}
+          onClick={() => closeSimulatedPosition(position.id, position.markPrice)}
           className="px-2 py-0.5 text-xs font-mono text-t-muted border border-t-border rounded-sm
                      hover:text-t-red hover:border-t-red transition-colors duration-100 opacity-0
                      group-hover:opacity-100"
