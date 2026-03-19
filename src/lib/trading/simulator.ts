@@ -22,12 +22,12 @@
 
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useAccountStore } from '@/stores/account-store';
-import type { ClosedTrade, Position } from '@/types/trading';
+import type { ClosedTrade, PendingOrder, Position } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice, calcMargin } from './pnl';
 import { roundSize, roundPrice, minSize } from './precision';
 import { validateSlTp } from './risk';
 import { INITIAL_BALANCE } from './types';
-import type { OpenOrderParams, PlaceOrderResult, ClosePositionResult, SimpleResult } from './types';
+import type { OpenOrderParams, PlaceOrderResult, ClosePositionResult, PlacePendingOrderParams, SimpleResult } from './types';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -157,6 +157,7 @@ export function placeMarketOrder(params: OpenOrderParams): PlaceOrderResult {
 export function closeSimulatedPosition(
   positionId: string,
   markPrice: number,
+  exitReason: 'manual' | 'stop-loss' | 'take-profit' | 'partial' = 'manual',
 ): ClosePositionResult {
   const { positions, balance } = _getState();
   const position = positions.find((p) => p.id === positionId);
@@ -185,6 +186,7 @@ export function closeSimulatedPosition(
     slPrice: position.slPrice,
     tpPrice: position.tpPrice,
     isPartial: false,
+    exitReason,
   };
 
   useAccountStore.getState().setBalance(balance + returned);
@@ -250,7 +252,7 @@ export function partialClosePosition(
 
   // Delegate to full close when the amount covers the whole position
   if (rounded >= position.size) {
-    return closeSimulatedPosition(positionId, markPrice);
+    return closeSimulatedPosition(positionId, markPrice, 'partial');
   }
 
   const realizedPnl = calcUnrealizedPnl(
@@ -265,7 +267,7 @@ export function partialClosePosition(
   const remainingSize = roundSize(position.size - rounded, position.symbol);
   // Edge case: rounding collapses remainder to 0 — treat as full close
   if (remainingSize <= 0) {
-    return closeSimulatedPosition(positionId, markPrice);
+    return closeSimulatedPosition(positionId, markPrice, 'partial');
   }
 
   const remainingPnl = calcUnrealizedPnl(
@@ -296,6 +298,7 @@ export function partialClosePosition(
     slPrice: position.slPrice,
     tpPrice: position.tpPrice,
     isPartial: true,
+    exitReason: 'partial',
   };
 
   useAccountStore.getState().setBalance(balance + returned);
@@ -305,6 +308,68 @@ export function partialClosePosition(
   syncEquity();
 
   return { ok: true, realizedPnl };
+}
+
+/**
+ * Place a pending limit or stop order.
+ * The order is stored in the terminal store and triggered by the execution engine
+ * when the mark price reaches the trigger level.
+ */
+export function placePendingOrder(params: PlacePendingOrderParams): PlaceOrderResult {
+  const { symbol, side, orderType, leverage, triggerPrice } = params;
+  const size = roundSize(params.size, symbol);
+  const trigger = roundPrice(triggerPrice, symbol);
+
+  if (trigger <= 0) return { ok: false, error: 'Invalid trigger price' };
+  if (size < minSize(symbol)) {
+    return { ok: false, error: `Min size is ${minSize(symbol)} ${symbol.replace('USDT', '')}` };
+  }
+
+  const { balance } = useAccountStore.getState();
+  const margin = calcMargin(size, trigger, leverage);
+  if (margin > balance) {
+    return {
+      ok: false,
+      error: `Insufficient balance (need $${margin.toFixed(2)}, have $${balance.toFixed(2)})`,
+    };
+  }
+
+  const { positions } = useTerminalStore.getState();
+  const opposingSide = side === 'Buy' ? 'Sell' : 'Buy';
+  if (positions.find((p) => p.symbol === symbol && p.side === opposingSide)) {
+    return { ok: false, error: `Close the ${opposingSide === 'Sell' ? 'Short' : 'Long'} position first` };
+  }
+  if (positions.find((p) => p.symbol === symbol && p.side === side)) {
+    return { ok: false, error: `A ${side === 'Buy' ? 'Long' : 'Short'} position is already open` };
+  }
+
+  const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const order: PendingOrder = {
+    id,
+    symbol,
+    side,
+    orderType,
+    size,
+    triggerPrice: trigger,
+    leverage,
+    createdAt: Date.now(),
+    ...(params.slPrice && params.slPrice > 0 ? { slPrice: roundPrice(params.slPrice, symbol) } : {}),
+    ...(params.tpPrice && params.tpPrice > 0 ? { tpPrice: roundPrice(params.tpPrice, symbol) } : {}),
+  };
+
+  useTerminalStore.getState().addPendingOrder(order);
+  return { ok: true, positionId: id };
+}
+
+/**
+ * Cancel a pending order by ID.
+ */
+export function cancelPendingOrder(orderId: string): SimpleResult {
+  const { pendingOrders } = useTerminalStore.getState();
+  const order = pendingOrders.find((o) => o.id === orderId);
+  if (!order) return { ok: false, error: 'Order not found' };
+  useTerminalStore.getState().removePendingOrder(orderId);
+  return { ok: true };
 }
 
 /**

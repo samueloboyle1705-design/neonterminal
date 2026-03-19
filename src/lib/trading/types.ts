@@ -36,3 +36,16 @@ export type ClosePositionResult =
 
 /** Generic success/error result with no extra payload. */
 export type SimpleResult = { ok: true } | { ok: false; error: string };
+
+// ── Pending order placement ───────────────────────────────────────────────────
+
+export interface PlacePendingOrderParams {
+  symbol: string;
+  side: TradeSide;
+  orderType: 'Limit' | 'Stop';
+  size: number;
+  triggerPrice: number;
+  leverage: number;
+  slPrice?: number;
+  tpPrice?: number;
+}

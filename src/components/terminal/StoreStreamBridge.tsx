@@ -17,6 +17,7 @@ import { useTickerStream } from '@/lib/marketData/hooks';
 import { SUPPORTED_SYMBOLS } from '@/lib/marketData';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { initSimulatedAccount, updatePositionPrices } from '@/lib/trading/simulator';
+import { checkSlTpTriggers, checkPendingOrders } from '@/lib/trading/execution';
 
 export function StoreStreamBridge() {
   const { ticks, status } = useTickerStream(SUPPORTED_SYMBOLS);
@@ -37,6 +38,9 @@ export function StoreStreamBridge() {
       setLivePrice(tick);
       // Keep open positions for this symbol marked-to-market.
       updatePositionPrices(tick.symbol, tick.markPrice);
+      // Auto-execute SL/TP and trigger pending orders.
+      checkSlTpTriggers(tick.symbol, tick.markPrice);
+      checkPendingOrders(tick.symbol, tick.markPrice);
     }
   }, [ticks, setLivePrice]);
 

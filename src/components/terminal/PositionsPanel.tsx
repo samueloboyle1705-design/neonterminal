@@ -6,11 +6,12 @@ import {
   closeSimulatedPosition,
   partialClosePosition,
   updatePositionSlTp,
+  cancelPendingOrder,
 } from '@/lib/trading/simulator';
 import { calcMargin, calcRoe } from '@/lib/trading/pnl';
 import { roundSize } from '@/lib/trading/precision';
 import { validateSlTp } from '@/lib/trading/risk';
-import type { ClosedTrade, Position } from '@/types/trading';
+import type { ClosedTrade, PendingOrder, Position } from '@/types/trading';
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -307,11 +308,93 @@ function HistoryRow({ trade }: { trade: ClosedTrade }) {
         )}
       </td>
       <td className="pr-4 py-2">
-        {trade.isPartial && (
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-t-surface text-t-muted border border-t-border/50">
-            partial
+        <ExitReasonBadge reason={trade.exitReason} />
+      </td>
+    </tr>
+  );
+}
+
+// ── ExitReasonBadge ───────────────────────────────────────────────────────────
+
+function ExitReasonBadge({ reason }: { reason: ClosedTrade['exitReason'] }) {
+  const styles: Record<ClosedTrade['exitReason'], string> = {
+    'manual':      'bg-t-surface text-t-muted border-t-border/50',
+    'stop-loss':   'bg-t-red-dim text-t-red border-t-red/25',
+    'take-profit': 'bg-t-green-dim text-t-green border-t-green/25',
+    'partial':     'bg-t-surface text-t-cyan border-t-cyan/25',
+  };
+  const labels: Record<ClosedTrade['exitReason'], string> = {
+    'manual':      'manual',
+    'stop-loss':   'SL',
+    'take-profit': 'TP',
+    'partial':     'partial',
+  };
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono border ${styles[reason]}`}>
+      {labels[reason]}
+    </span>
+  );
+}
+
+// ── PendingOrderRow ───────────────────────────────────────────────────────────
+
+function PendingOrderRow({ order }: { order: PendingOrder }) {
+  const isBuy     = order.side === 'Buy';
+  const baseCcy   = order.symbol.replace('USDT', '');
+  const [cancelling, setCancelling] = useState(false);
+
+  function handleCancel() {
+    setCancelling(true);
+    cancelPendingOrder(order.id);
+  }
+
+  return (
+    <tr className="border-b border-t-border/30 last:border-0 hover:bg-t-surface/30 transition-colors duration-75 group">
+      <td className="pl-4 pr-3 py-2 font-mono text-[10px] text-t-muted tabular-nums whitespace-nowrap">
+        {timeAgo(order.createdAt)}
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-t-text whitespace-nowrap">
+        <span className="font-semibold">{baseCcy}</span>
+        <span className="text-t-muted">/USDT</span>
+      </td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        <span className={[
+          'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider',
+          isBuy ? 'bg-t-green-dim text-t-green' : 'bg-t-red-dim text-t-red',
+        ].join(' ')}>
+          {isBuy ? 'Long' : 'Short'}
+        </span>
+      </td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-t-surface text-t-muted border border-t-border/50 uppercase">
+          {order.orderType}
+        </span>
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">
+        {fmtSize(order.size)} {baseCcy}
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        <span className="font-mono text-xs text-t-cyan tabular-nums">@ {fmtPrice(order.triggerPrice)}</span>
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        {(order.slPrice || order.tpPrice) ? (
+          <span className="font-mono text-[10px] text-t-muted tabular-nums">
+            {order.slPrice ? <span className="text-t-red/60">SL {fmtPrice(order.slPrice)}</span> : null}
+            {order.slPrice && order.tpPrice ? <span className="text-t-muted/40"> · </span> : null}
+            {order.tpPrice ? <span className="text-t-green/60">TP {fmtPrice(order.tpPrice)}</span> : null}
           </span>
+        ) : (
+          <span className="font-mono text-[10px] text-t-muted/30">—</span>
         )}
+      </td>
+      <td className="pr-4 py-2">
+        <button
+          onClick={handleCancel}
+          disabled={cancelling}
+          className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-[10px] font-mono rounded border border-t-border text-t-muted hover:text-t-red hover:border-t-red hover:bg-t-red-dim transition-colors disabled:opacity-30"
+        >
+          Cancel
+        </button>
       </td>
     </tr>
   );
@@ -322,9 +405,9 @@ function HistoryRow({ trade }: { trade: ClosedTrade }) {
 type ActiveTab = 'positions' | 'orders' | 'history';
 
 export function PositionsPanel() {
-  const positions    = useTerminalStore((s) => s.positions);
-  const openOrders   = useTerminalStore((s) => s.openOrders);
-  const tradeHistory = useTerminalStore((s) => s.tradeHistory);
+  const positions     = useTerminalStore((s) => s.positions);
+  const pendingOrders = useTerminalStore((s) => s.pendingOrders);
+  const tradeHistory  = useTerminalStore((s) => s.tradeHistory);
 
   const [activeTab,  setActiveTab]  = useState<ActiveTab>('positions');
   const [editingId,  setEditingId]  = useState<string | null>(null);
@@ -345,8 +428,8 @@ export function PositionsPanel() {
   }
 
   const tabs: { id: ActiveTab; label: string; count?: number; accent?: boolean }[] = [
-    { id: 'positions', label: 'Positions', count: positions.length,   accent: positions.length > 0 },
-    { id: 'orders',    label: 'Orders',    count: openOrders.length },
+    { id: 'positions', label: 'Positions', count: positions.length,     accent: positions.length > 0 },
+    { id: 'orders',    label: 'Orders',    count: pendingOrders.length,  accent: pendingOrders.length > 0 },
     { id: 'history',   label: 'History',   count: tradeHistory.length },
   ];
 
@@ -432,9 +515,32 @@ export function PositionsPanel() {
 
         {/* Orders tab */}
         {activeTab === 'orders' && (
-          <div className="flex items-center justify-center h-full">
-            <span className="text-xs font-mono text-t-muted">No open orders</span>
-          </div>
+          pendingOrders.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-xs font-mono text-t-muted">No pending orders</span>
+            </div>
+          ) : (
+            <table className="w-full text-left min-w-max">
+              <thead className="sticky top-0 bg-t-panel z-10 border-b border-t-border">
+                <tr>
+                  {['Time', 'Symbol', 'Side', 'Type', 'Size', 'Trigger', 'SL / TP', ''].map((h) => (
+                    <th key={h} className={[
+                      'py-1.5 text-[10px] font-mono text-t-muted font-normal whitespace-nowrap uppercase tracking-wider',
+                      h === 'Time' ? 'pl-4 pr-3' : 'px-3',
+                      h === '' ? 'pr-4' : '',
+                    ].join(' ')}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pendingOrders.map((order) => (
+                  <PendingOrderRow key={order.id} order={order} />
+                ))}
+              </tbody>
+            </table>
+          )
         )}
 
         {/* History tab */}
@@ -447,7 +553,7 @@ export function PositionsPanel() {
             <table className="w-full text-left min-w-max">
               <thead className="sticky top-0 bg-t-panel z-10 border-b border-t-border">
                 <tr>
-                  {['Time', 'Symbol', 'Side', 'Size', 'Entry → Exit', 'rPnL', 'SL / TP', ''].map((h) => (
+                  {['Time', 'Symbol', 'Side', 'Size', 'Entry → Exit', 'rPnL', 'SL / TP', 'Exit'].map((h) => (
                     <th key={h} className={[
                       'py-1.5 text-[10px] font-mono text-t-muted font-normal whitespace-nowrap uppercase tracking-wider',
                       h === 'Time' ? 'pl-4 pr-3' : 'px-3',

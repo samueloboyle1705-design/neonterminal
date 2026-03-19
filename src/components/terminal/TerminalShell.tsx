@@ -15,6 +15,7 @@ import { TimeframeTabs } from './TimeframeTabs';
 import { ChartPanel } from './ChartPanel';
 import { OrderPanel } from './OrderPanel';
 import { PositionsPanel } from './PositionsPanel';
+import { NotificationStack } from './NotificationStack';
 
 export function TerminalShell() {
   return (
@@ -42,6 +43,9 @@ export function TerminalShell() {
 
       {/* ── Bottom: positions ───────────────────────────────────────────── */}
       <PositionsPanel />
+
+      {/* ── Notification stack (fixed overlay, top-right) ────────────────── */}
+      <NotificationStack />
     </div>
   );
 }

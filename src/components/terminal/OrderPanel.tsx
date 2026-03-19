@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useTerminalStore, selectCurrentPrice } from '@/stores/terminal-store';
 import { useAccountStore } from '@/stores/account-store';
-import { placeMarketOrder } from '@/lib/trading/simulator';
+import { placeMarketOrder, placePendingOrder } from '@/lib/trading/simulator';
 import { roundSize } from '@/lib/trading/precision';
 import { calcMargin } from '@/lib/trading/pnl';
 import { calcSizeFromRisk, calcRiskMetrics, validateSlTp } from '@/lib/trading/risk';
@@ -17,6 +17,7 @@ type LeverageOption = (typeof LEVERAGE_OPTIONS)[number];
 const PCT_PRESETS = [25, 50, 75, 100] as const;
 type SizeMode = 'manual' | 'risk';
 type RiskUnit = '$' | '%';
+type OrderType = 'Market' | 'Limit' | 'Stop';
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ function fmtPct(n: number, showSign = false): string {
   return `${sign}${(Math.abs(n) * 100).toFixed(2)}%`;
 }
 
-// ── Section header ────────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -49,8 +50,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-// ── Metric row ────────────────────────────────────────────────────────────────
 
 function MetricRow({
   label,
@@ -73,6 +72,14 @@ function MetricRow({
   );
 }
 
+// ── Order type descriptions ───────────────────────────────────────────────────
+
+const ORDER_TYPE_HINTS: Record<OrderType, string> = {
+  Market: 'fill @ mark',
+  Limit:  'fill at or better',
+  Stop:   'breakout trigger',
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function OrderPanel() {
@@ -81,107 +88,160 @@ export function OrderPanel() {
   const balance        = useAccountStore((s) => s.balance);
 
   // ── Form state ──────────────────────────────────────────────────────────────
-  const [side, setSide]           = useState<TradeSide>('Buy');
-  const [orderMode]               = useState<'Market'>('Market'); // Limit: future phase
-  const [sizeMode, setSizeMode]   = useState<SizeMode>('manual');
-  const [sizeInput, setSizeInput] = useState('');
-  const [riskInput, setRiskInput] = useState('');
-  const [riskUnit, setRiskUnit]   = useState<RiskUnit>('$');
-  const [slInput, setSlInput]     = useState('');
-  const [tpInput, setTpInput]     = useState('');
-  const [leverage, setLeverage]   = useState<LeverageOption>(10);
-  const [error, setError]         = useState<string | null>(null);
-  const [success, setSuccess]     = useState<string | null>(null);
+  const [side, setSide]               = useState<TradeSide>('Buy');
+  const [orderType, setOrderType]     = useState<OrderType>('Market');
+  const [sizeMode, setSizeMode]       = useState<SizeMode>('manual');
+  const [sizeInput, setSizeInput]     = useState('');
+  const [riskInput, setRiskInput]     = useState('');
+  const [riskUnit, setRiskUnit]       = useState<RiskUnit>('$');
+  const [triggerInput, setTriggerInput] = useState('');
+  const [slInput, setSlInput]         = useState('');
+  const [tpInput, setTpInput]         = useState('');
+  const [leverage, setLeverage]       = useState<LeverageOption>(10);
+  const [error, setError]             = useState<string | null>(null);
+  const [success, setSuccess]         = useState<string | null>(null);
 
-  // Cleanup success toast timer on unmount
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  // Reset all inputs when symbol changes
+  // Reset inputs when symbol changes
   useEffect(() => {
     setError(null); setSuccess(null);
     setSizeInput(''); setRiskInput('');
-    setSlInput('');  setTpInput('');
+    setSlInput(''); setTpInput('');
+    setTriggerInput('');
   }, [selectedSymbol]);
 
-  // Clear feedback when side changes
-  useEffect(() => { setError(null); setSuccess(null); }, [side]);
+  // Clear feedback on side / type change
+  useEffect(() => { setError(null); setSuccess(null); }, [side, orderType]);
 
   // ── Derived values ──────────────────────────────────────────────────────────
   const markPrice    = currentTick?.markPrice ?? 0;
   const baseCurrency = selectedSymbol.replace('USDT', '');
   const isBuy        = side === 'Buy';
+  const isPending    = orderType !== 'Market';
 
-  // Parse SL / TP prices (null if empty / zero)
+  // Trigger price (only relevant for Limit/Stop orders)
+  const triggerPrice = useMemo(() => {
+    const v = parseFloat(triggerInput);
+    return v > 0 ? v : null;
+  }, [triggerInput]);
+
+  // The price used as entry reference for SL/TP validation and risk metrics
+  const effectiveEntryPrice = isPending
+    ? (triggerPrice ?? markPrice)
+    : markPrice;
+
   const slPrice = useMemo(() => {
     const v = parseFloat(slInput);
     return v > 0 ? v : null;
   }, [slInput]);
+
   const tpPrice = useMemo(() => {
     const v = parseFloat(tpInput);
     return v > 0 ? v : null;
   }, [tpInput]);
 
-  // Risk amount in $ (converts % of balance when unit is %)
   const riskDollars = useMemo(() => {
     const raw = parseFloat(riskInput) || 0;
     return riskUnit === '%' ? (raw / 100) * balance : raw;
   }, [riskInput, riskUnit, balance]);
 
-  // Effective size — manual input OR risk-derived
   const size = useMemo(() => {
     if (sizeMode === 'manual') return parseFloat(sizeInput) || 0;
-    if (riskDollars > 0 && slPrice !== null && slPrice > 0 && markPrice > 0) {
-      return roundSize(calcSizeFromRisk(riskDollars, markPrice, slPrice), selectedSymbol);
+    if (riskDollars > 0 && slPrice !== null && slPrice > 0 && effectiveEntryPrice > 0) {
+      return roundSize(calcSizeFromRisk(riskDollars, effectiveEntryPrice, slPrice), selectedSymbol);
     }
     return 0;
-  }, [sizeMode, sizeInput, riskDollars, slPrice, markPrice, selectedSymbol]);
+  }, [sizeMode, sizeInput, riskDollars, slPrice, effectiveEntryPrice, selectedSymbol]);
 
-  // SL/TP validation (uses markPrice as proxy for entry at time of submit)
   const { slError, tpError } = useMemo(
-    () => validateSlTp(side, markPrice, slPrice, tpPrice),
-    [side, markPrice, slPrice, tpPrice],
+    () => validateSlTp(side, effectiveEntryPrice, slPrice, tpPrice),
+    [side, effectiveEntryPrice, slPrice, tpPrice],
   );
 
-  // Risk / reward metrics
   const metrics = useMemo(
-    () => calcRiskMetrics(side, size, markPrice, slPrice, tpPrice),
-    [side, size, markPrice, slPrice, tpPrice],
+    () => calcRiskMetrics(side, size, effectiveEntryPrice, slPrice, tpPrice),
+    [side, size, effectiveEntryPrice, slPrice, tpPrice],
   );
 
-  // Order summary numbers
-  const notional       = size * markPrice;
-  const requiredMargin = calcMargin(size, markPrice, leverage);
-  const canSubmit      = markPrice > 0 && size > 0 && !slError && !tpError;
+  const notional       = size * effectiveEntryPrice;
+  const requiredMargin = calcMargin(size, effectiveEntryPrice, leverage);
+
+  // Trigger price validation for pending orders
+  const triggerError = useMemo(() => {
+    if (!isPending || !triggerPrice) return null;
+    if (markPrice <= 0) return null; // no live price yet
+    if (orderType === 'Limit') {
+      if (side === 'Buy'  && triggerPrice >= markPrice) return 'Limit Buy must be below mark price';
+      if (side === 'Sell' && triggerPrice <= markPrice) return 'Limit Sell must be above mark price';
+    }
+    if (orderType === 'Stop') {
+      if (side === 'Buy'  && triggerPrice <= markPrice) return 'Stop Buy must be above mark price';
+      if (side === 'Sell' && triggerPrice >= markPrice) return 'Stop Sell must be below mark price';
+    }
+    return null;
+  }, [isPending, orderType, side, triggerPrice, markPrice]);
+
+  const canSubmit = effectiveEntryPrice > 0 && size > 0 && !slError && !tpError &&
+    (!isPending || (triggerPrice !== null && !triggerError));
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
   const handlePctFill = useCallback((pct: number) => {
-    if (markPrice <= 0 || balance <= 0) return;
-    const margin   = (balance * pct) / 100;
-    const rawSize  = (margin * leverage) / markPrice;
+    const refPrice = effectiveEntryPrice > 0 ? effectiveEntryPrice : markPrice;
+    if (refPrice <= 0 || balance <= 0) return;
+    const margin  = (balance * pct) / 100;
+    const rawSize = (margin * leverage) / refPrice;
     setSizeInput(String(roundSize(rawSize, selectedSymbol)));
     setError(null);
-  }, [balance, leverage, markPrice, selectedSymbol]);
+  }, [balance, leverage, effectiveEntryPrice, markPrice, selectedSymbol]);
 
   const handleSubmit = useCallback(() => {
     setError(null); setSuccess(null);
 
-    const result = placeMarketOrder({
-      symbol: selectedSymbol, side, size, leverage, markPrice,
-      slPrice: slPrice ?? undefined,
-      tpPrice: tpPrice ?? undefined,
-    });
+    if (isPending) {
+      if (!triggerPrice || triggerPrice <= 0) {
+        setError('Enter a trigger price for this order type');
+        return;
+      }
 
-    if (!result.ok) { setError(result.error); return; }
+      const result = placePendingOrder({
+        symbol: selectedSymbol,
+        side,
+        orderType: orderType as 'Limit' | 'Stop',
+        size,
+        triggerPrice,
+        leverage,
+        slPrice: slPrice ?? undefined,
+        tpPrice: tpPrice ?? undefined,
+      });
 
-    // On success: clear size / risk inputs, keep SL/TP for next order
-    setSizeInput(''); setRiskInput('');
-    const msg = `${isBuy ? 'Long' : 'Short'} opened · ${size} ${baseCurrency} @ $${fmtPrice(markPrice)}`;
-    setSuccess(msg);
+      if (!result.ok) { setError(result.error); return; }
+
+      setSizeInput(''); setRiskInput(''); setTriggerInput('');
+      const msg = `${orderType} ${isBuy ? 'Long' : 'Short'} placed · ${size} ${baseCurrency} @ $${fmtPrice(triggerPrice)}`;
+      setSuccess(msg);
+    } else {
+      const result = placeMarketOrder({
+        symbol: selectedSymbol, side, size, leverage, markPrice,
+        slPrice: slPrice ?? undefined,
+        tpPrice: tpPrice ?? undefined,
+      });
+
+      if (!result.ok) { setError(result.error); return; }
+
+      setSizeInput(''); setRiskInput('');
+      const msg = `${isBuy ? 'Long' : 'Short'} opened · ${size} ${baseCurrency} @ $${fmtPrice(markPrice)}`;
+      setSuccess(msg);
+    }
+
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setSuccess(null), 4_000);
-  }, [selectedSymbol, side, size, leverage, markPrice, slPrice, tpPrice, isBuy, baseCurrency]);
+  }, [
+    isPending, triggerPrice, selectedSymbol, side, orderType, size, leverage,
+    markPrice, slPrice, tpPrice, isBuy, baseCurrency,
+  ]);
 
   // ── Colour helpers ──────────────────────────────────────────────────────────
   const activeGreen = 'bg-t-green-dim border-t-green text-t-green';
@@ -214,17 +274,30 @@ export function OrderPanel() {
       </div>
 
       {/* ── Order type tabs ───────────────────────────────────────────────── */}
-      <div className="flex items-stretch h-7 border-b border-t-border shrink-0">
-        <div className="relative flex items-center px-3">
-          <span className="text-[10px] font-mono text-t-sub">Market</span>
-          <span className="absolute bottom-0 left-0 right-0 h-px bg-t-border-hi" />
-        </div>
-        <div className="flex items-center px-3">
-          <span className="text-[10px] font-mono text-t-muted opacity-40">Limit</span>
-        </div>
+      <div className="flex items-stretch border-b border-t-border shrink-0">
+        {(['Market', 'Limit', 'Stop'] as OrderType[]).map((ot) => {
+          const active = orderType === ot;
+          return (
+            <button
+              key={ot}
+              onClick={() => setOrderType(ot)}
+              className={[
+                'relative flex items-center px-3 h-7 text-[10px] font-mono transition-colors duration-100',
+                active
+                  ? 'text-t-sub'
+                  : 'text-t-muted hover:text-t-sub',
+              ].join(' ')}
+            >
+              {ot}
+              {active && (
+                <span className="absolute bottom-0 left-0 right-0 h-px bg-t-border-hi" />
+              )}
+            </button>
+          );
+        })}
         <div className="flex-1" />
         <span className="flex items-center pr-3 text-[9px] font-mono text-t-muted tracking-wide">
-          fill @ mark
+          {ORDER_TYPE_HINTS[orderType]}
         </span>
       </div>
 
@@ -238,6 +311,39 @@ export function OrderPanel() {
             {markPrice > 0 ? `$${fmtPrice(markPrice)}` : '—'}
           </span>
         </div>
+
+        {/* ── Trigger price (Limit / Stop only) ─────────────────────────── */}
+        {isPending && (
+          <>
+            <SectionLabel>Trigger Price</SectionLabel>
+            <div className="px-3 pb-2">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono text-t-cyan w-5 shrink-0 font-semibold">@</span>
+                <input
+                  type="number"
+                  value={triggerInput}
+                  placeholder={markPrice > 0 ? fmtPrice(markPrice) : 'Price'}
+                  onChange={(e) => { setTriggerInput(e.target.value); setError(null); }}
+                  className={[
+                    'flex-1 min-w-0 bg-t-surface border rounded px-2.5 py-1.5 text-xs font-mono text-t-text placeholder:text-t-muted outline-none transition-colors',
+                    triggerError ? 'border-t-red/60 focus:border-t-red' : 'border-t-border focus:border-t-border-hi',
+                  ].join(' ')}
+                />
+                <span className="text-[9px] font-mono text-t-muted shrink-0">USDT</span>
+              </div>
+              {triggerError && (
+                <p className="text-[9px] font-mono text-t-red mt-0.5 pl-6">{triggerError}</p>
+              )}
+              {!triggerError && triggerPrice && markPrice > 0 && (
+                <p className="text-[9px] font-mono text-t-muted mt-0.5 pl-6">
+                  {orderType === 'Limit'
+                    ? `≈ ${fmtPct((triggerPrice - markPrice) / markPrice, true)} from mark`
+                    : `triggers ${triggerPrice > markPrice ? 'above' : 'below'} mark`}
+                </p>
+              )}
+            </div>
+          </>
+        )}
 
         {/* ── SIZE SECTION ──────────────────────────────────────────────── */}
         <SectionLabel>Size</SectionLabel>
@@ -257,7 +363,6 @@ export function OrderPanel() {
         </div>
 
         {sizeMode === 'manual' ? (
-          /* Manual size input */
           <div className="px-3 pb-1">
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[10px] font-mono text-t-muted w-8 shrink-0">Size</span>
@@ -271,7 +376,7 @@ export function OrderPanel() {
             <div className="flex gap-1">
               {PCT_PRESETS.map((pct) => (
                 <button key={pct} onClick={() => handlePctFill(pct)}
-                  disabled={markPrice <= 0 || balance <= 0}
+                  disabled={effectiveEntryPrice <= 0 || balance <= 0}
                   className={['flex-1 py-1 text-[9px] font-mono rounded border transition-colors duration-100', btnInactive, 'disabled:opacity-25 disabled:cursor-not-allowed'].join(' ')}
                 >
                   {pct === 100 ? 'Max' : `${pct}%`}
@@ -280,7 +385,6 @@ export function OrderPanel() {
             </div>
           </div>
         ) : (
-          /* Risk-based size input */
           <div className="px-3 pb-1">
             <div className="flex items-center gap-1.5 mb-1.5">
               <span className="text-[10px] font-mono text-t-muted w-8 shrink-0">Risk</span>
@@ -289,14 +393,12 @@ export function OrderPanel() {
                 onChange={(e) => { setRiskInput(e.target.value); setError(null); }}
                 className="flex-1 min-w-0 bg-t-surface border border-t-border rounded px-2.5 py-1.5 text-xs font-mono text-t-text placeholder:text-t-muted outline-none focus:border-t-border-hi transition-colors"
               />
-              {/* $ / % toggle */}
               <button onClick={() => setRiskUnit(riskUnit === '$' ? '%' : '$')}
                 className={['px-2 py-1.5 text-[10px] font-mono rounded border transition-colors duration-100 shrink-0', sideActive].join(' ')}
               >
                 {riskUnit}
               </button>
             </div>
-            {/* Equivalent in other unit */}
             {riskDollars > 0 && balance > 0 && (
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[9px] font-mono text-t-muted">
@@ -306,7 +408,6 @@ export function OrderPanel() {
                 </span>
               </div>
             )}
-            {/* Computed size */}
             <div className="flex items-center justify-between px-2.5 py-1.5 rounded border bg-t-surface/40 border-t-border/60">
               <span className="text-[10px] font-mono text-t-muted">Computed size</span>
               <span className="text-xs font-mono tabular-nums text-t-text">
@@ -321,6 +422,14 @@ export function OrderPanel() {
         {/* ── SL / TP SECTION ───────────────────────────────────────────── */}
         <SectionLabel>Stop Loss / Take Profit</SectionLabel>
 
+        {isPending && effectiveEntryPrice > 0 && (
+          <div className="mx-3 mb-1.5 px-2.5 py-1 rounded border border-t-cyan/20 bg-t-surface/30">
+            <p className="text-[9px] font-mono text-t-muted">
+              Validating SL/TP against trigger price{triggerPrice ? ` ($${fmtPrice(triggerPrice)})` : ''}
+            </p>
+          </div>
+        )}
+
         {/* SL row */}
         <div className="px-3 mb-1.5">
           <div className="flex items-center gap-1.5">
@@ -333,7 +442,6 @@ export function OrderPanel() {
                 slError ? 'border-t-red/60 focus:border-t-red' : 'border-t-border focus:border-t-border-hi',
               ].join(' ')}
             />
-            {/* SL metrics */}
             {slPrice && !slError && metrics.slDistance > 0 ? (
               <div className="flex flex-col items-end shrink-0 gap-0">
                 <span className="text-[9px] font-mono text-t-red tabular-nums">
@@ -364,7 +472,6 @@ export function OrderPanel() {
                 tpError ? 'border-t-red/60 focus:border-t-red' : 'border-t-border focus:border-t-border-hi',
               ].join(' ')}
             />
-            {/* TP metrics */}
             {tpPrice && !tpError && metrics.tpDistance > 0 ? (
               <div className="flex flex-col items-end shrink-0 gap-0">
                 <span className="text-[9px] font-mono text-t-green tabular-nums">
@@ -397,6 +504,13 @@ export function OrderPanel() {
         <SectionLabel>Summary</SectionLabel>
 
         <div className="mx-3 mb-2 rounded border border-t-border bg-t-surface/30 overflow-hidden">
+          {isPending && triggerPrice && (
+            <MetricRow
+              label="Trigger"
+              value={`$${fmtPrice(triggerPrice)}`}
+              valueClass="text-t-cyan"
+            />
+          )}
           <MetricRow label="Notional"    value={notional > 0 ? `$${fmtPrice(notional)}` : '—'} />
           <MetricRow label="Margin req." value={requiredMargin > 0 ? `$${fmtPrice(requiredMargin)}` : '—'} />
           <MetricRow
@@ -446,7 +560,9 @@ export function OrderPanel() {
               !canSubmit && 'opacity-30 cursor-not-allowed',
             ].join(' ')}
           >
-            {isBuy ? 'Buy / Long' : 'Sell / Short'}
+            {isPending
+              ? `Place ${orderType} ${isBuy ? 'Buy' : 'Sell'}`
+              : (isBuy ? 'Buy / Long' : 'Sell / Short')}
           </button>
         </div>
       </div>

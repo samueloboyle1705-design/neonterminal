@@ -10,7 +10,7 @@ import type {
   SupportedSymbol,
 } from '@/lib/marketData';
 import { SUPPORTED_SYMBOLS } from '@/lib/marketData';
-import type { ClosedTrade, Order, Position } from '@/types/trading';
+import type { ClosedTrade, Order, PendingOrder, Position } from '@/types/trading';
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -48,6 +48,7 @@ interface TerminalState {
   // --- Trading ---
   positions: Position[];
   openOrders: Order[];
+  pendingOrders: PendingOrder[];
   tradeHistory: ClosedTrade[];
 }
 
@@ -80,6 +81,10 @@ interface TerminalActions {
   // Orders
   upsertOrder: (order: Order) => void;
   cancelOrder: (orderId: string) => void;
+
+  // Pending orders
+  addPendingOrder: (order: PendingOrder) => void;
+  removePendingOrder: (orderId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +101,7 @@ const INITIAL: TerminalState = {
   connectionStatus: 'disconnected',
   positions: [],
   openOrders: [],
+  pendingOrders: [],
   tradeHistory: [],
 };
 
@@ -208,6 +214,22 @@ export const useTerminalStore = create<TerminalState & TerminalActions>()(
           (s) => ({ openOrders: s.openOrders.filter((o) => o.id !== orderId) }),
           false,
           'cancelOrder',
+        ),
+
+      // --- Pending orders ---
+
+      addPendingOrder: (order) =>
+        set(
+          (s) => ({ pendingOrders: [...s.pendingOrders, order] }),
+          false,
+          'addPendingOrder',
+        ),
+
+      removePendingOrder: (orderId) =>
+        set(
+          (s) => ({ pendingOrders: s.pendingOrders.filter((o) => o.id !== orderId) }),
+          false,
+          'removePendingOrder',
         ),
     }),
     { name: 'TerminalStore', enabled: process.env.NODE_ENV !== 'production' },

@@ -65,6 +65,27 @@ export interface ClosedTrade {
   tpPrice?: number;
   /** True when only part of the position was closed. */
   isPartial: boolean;
+  /** Why the position (or portion) was closed. */
+  exitReason: 'manual' | 'stop-loss' | 'take-profit' | 'partial';
+}
+
+// ---------------------------------------------------------------------------
+// Pending Order (simulated limit / stop orders waiting for price trigger)
+// ---------------------------------------------------------------------------
+
+export type PendingOrderType = 'Limit' | 'Stop';
+
+export interface PendingOrder {
+  id: string;
+  symbol: string;
+  side: TradeSide;
+  orderType: PendingOrderType;
+  size: number;
+  triggerPrice: number;
+  leverage: number;
+  slPrice?: number;
+  tpPrice?: number;
+  createdAt: number;
 }
 
 // ---------------------------------------------------------------------------
