@@ -1,10 +1,12 @@
 @import "tailwindcss";
 
+/* ── Base CSS variables ─────────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #090b0e;
+  --foreground: #dde2ed;
 }
 
+/* ── Tailwind theme tokens ──────────────────────────────────────────────── */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -12,15 +14,56 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/*
+ * Terminal color palette.
+ * All tokens start with `t-` to avoid collisions with Tailwind defaults.
+ * Usage: bg-t-bg, text-t-green, border-t-border, etc.
+ */
+@theme {
+  /* Backgrounds — deepest to lightest */
+  --color-t-bg:       #090b0e;
+  --color-t-panel:    #0d1117;
+  --color-t-surface:  #111823;
+  --color-t-overlay:  #19243a;
+
+  /* Borders */
+  --color-t-border:    #1c2638;
+  --color-t-border-hi: #2a3850;
+
+  /* Text */
+  --color-t-text:   #dde2ed;
+  --color-t-sub:    #7d8a9e;
+  --color-t-muted:  #3f4d62;
+
+  /* Semantic — trading signals */
+  --color-t-green:  #00d97e;
+  --color-t-red:    #f63d68;
+  --color-t-amber:  #f59e0b;
+  --color-t-blue:   #60a5fa;
+  --color-t-accent: #7c6af7;
+
+  /* Semantic — faded variants for backgrounds */
+  --color-t-green-dim: #001f12;
+  --color-t-red-dim:   #200813;
 }
 
+/* ── Global resets for the terminal ────────────────────────────────────── */
+html,
 body {
+  height: 100%;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* Terminal is a fixed viewport app */
 }
+
+/* Thin, dark scrollbars for panels that overflow */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1c2638 transparent;
+}
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: #1c2638; border-radius: 2px; }
+*::-webkit-scrollbar-thumb:hover { background: #2a3850; }
