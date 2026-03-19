@@ -10,7 +10,7 @@ import {
 import { calcMargin, calcRoe } from '@/lib/trading/pnl';
 import { roundSize } from '@/lib/trading/precision';
 import { validateSlTp } from '@/lib/trading/risk';
-import type { Position } from '@/types/trading';
+import type { ClosedTrade, Position } from '@/types/trading';
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
@@ -32,11 +32,15 @@ function fmtSize(n: number): string {
   return n < 0.01 ? n.toFixed(4) : n < 1 ? n.toFixed(3) : n.toFixed(2);
 }
 
+function timeAgo(ts: number): string {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60)   return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
 // ── EditPanel ─────────────────────────────────────────────────────────────────
-//
-// Renders as a full-width <td colSpan={9}> beneath its parent row.
-// Manages its own local SL/TP input and partial-close input state.
-// Re-mounts (key reset) each time it's opened, so inputs seed from live position.
 
 interface EditPanelProps {
   position: Position;
@@ -50,7 +54,6 @@ function EditPanel({ position, onDone }: EditPanelProps) {
   const [error,      setError]      = useState<string | null>(null);
   const [saved,      setSaved]      = useState(false);
 
-  // Inline SL/TP validation (updates as user types)
   const slNum = parseFloat(slInput) || null;
   const tpNum = parseFloat(tpInput) || null;
   const { slError, tpError } = validateSlTp(position.side, position.entryPrice, slNum, tpNum);
@@ -66,9 +69,7 @@ function EditPanel({ position, onDone }: EditPanelProps) {
 
   function handleClearSlTp() {
     updatePositionSlTp(position.id, null, null);
-    setSlInput('');
-    setTpInput('');
-    setError(null);
+    setSlInput(''); setTpInput(''); setError(null);
   }
 
   function setClosePct(pct: number) {
@@ -86,24 +87,16 @@ function EditPanel({ position, onDone }: EditPanelProps) {
     onDone();
   }
 
-  const hasSavedSlTp = !!(position.slPrice || position.tpPrice);
-  const slTpDirty = slError === null && tpError === null && (
-    String(position.slPrice ?? '') !== slInput || String(position.tpPrice ?? '') !== tpInput
-  );
-
   return (
     <td colSpan={9} className="px-3 pb-2.5 pt-0">
       <div className="flex items-start gap-4 bg-t-surface border border-t-border rounded px-3 py-2">
 
-        {/* ── SL / TP section ─────────────────────────────────────── */}
+        {/* SL / TP section */}
         <div className="flex items-start gap-2">
-          <span className="text-[10px] font-mono text-t-muted uppercase tracking-wider pt-1 shrink-0 w-10">
-            SL/TP
-          </span>
+          <span className="text-[10px] font-mono text-t-muted uppercase tracking-wider pt-1 shrink-0 w-10">SL/TP</span>
           <div className="flex flex-col gap-0.5">
             <input
-              type="number"
-              value={slInput}
+              type="number" value={slInput}
               onChange={(e) => { setSlInput(e.target.value); setError(null); }}
               onKeyDown={(e) => e.key === 'Enter' && handleSaveSlTp()}
               placeholder="SL price"
@@ -113,14 +106,11 @@ function EditPanel({ position, onDone }: EditPanelProps) {
                 slError ? 'border-t-red/50' : 'border-t-border focus:border-t-red/40',
               ].join(' ')}
             />
-            {slError && (
-              <span className="text-[9px] font-mono text-t-red/80 leading-none">{slError}</span>
-            )}
+            {slError && <span className="text-[9px] font-mono text-t-red/80 leading-none">{slError}</span>}
           </div>
           <div className="flex flex-col gap-0.5">
             <input
-              type="number"
-              value={tpInput}
+              type="number" value={tpInput}
               onChange={(e) => { setTpInput(e.target.value); setError(null); }}
               onKeyDown={(e) => e.key === 'Enter' && handleSaveSlTp()}
               placeholder="TP price"
@@ -130,9 +120,7 @@ function EditPanel({ position, onDone }: EditPanelProps) {
                 tpError ? 'border-t-green/50' : 'border-t-border focus:border-t-green/40',
               ].join(' ')}
             />
-            {tpError && (
-              <span className="text-[9px] font-mono text-t-green/80 leading-none">{tpError}</span>
-            )}
+            {tpError && <span className="text-[9px] font-mono text-t-green/80 leading-none">{tpError}</span>}
           </div>
           <div className="flex items-center gap-1 pt-0.5">
             <button
@@ -148,28 +136,21 @@ function EditPanel({ position, onDone }: EditPanelProps) {
             >
               {saved ? '✓ Saved' : 'Save'}
             </button>
-            {hasSavedSlTp && (
-              <button
-                onClick={handleClearSlTp}
-                className="px-1.5 py-0.5 text-[10px] font-mono text-t-muted hover:text-t-red transition-colors"
-              >
+            {(position.slPrice || position.tpPrice) && (
+              <button onClick={handleClearSlTp} className="px-1.5 py-0.5 text-[10px] font-mono text-t-muted hover:text-t-red transition-colors">
                 Clear
               </button>
             )}
           </div>
         </div>
 
-        {/* ── Divider ─────────────────────────────────────────────── */}
         <div className="w-px self-stretch bg-t-border shrink-0" />
 
-        {/* ── Partial close section ────────────────────────────────── */}
+        {/* Partial close section */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] font-mono text-t-muted uppercase tracking-wider shrink-0 w-10">
-            Close
-          </span>
+          <span className="text-[10px] font-mono text-t-muted uppercase tracking-wider shrink-0 w-10">Close</span>
           <input
-            type="number"
-            value={closeInput}
+            type="number" value={closeInput}
             onChange={(e) => { setCloseInput(e.target.value); setError(null); }}
             onKeyDown={(e) => e.key === 'Enter' && handlePartialClose()}
             placeholder={fmtSize(position.size)}
@@ -177,14 +158,8 @@ function EditPanel({ position, onDone }: EditPanelProps) {
           />
           {[25, 50, 75, 100].map((pct) => (
             <button
-              key={pct}
-              onClick={() => setClosePct(pct)}
-              className={[
-                'px-1.5 py-0.5 text-[10px] font-mono border rounded transition-colors',
-                parseFloat(closeInput) === roundSize((position.size * pct) / 100, position.symbol) && parseFloat(closeInput) > 0
-                  ? 'text-t-text border-t-border-hi bg-t-surface'
-                  : 'text-t-muted border-t-border hover:text-t-text hover:border-t-border-hi',
-              ].join(' ')}
+              key={pct} onClick={() => setClosePct(pct)}
+              className="px-1.5 py-0.5 text-[10px] font-mono border border-t-border rounded text-t-muted hover:text-t-text hover:border-t-border-hi transition-colors"
             >
               {pct}%
             </button>
@@ -197,17 +172,8 @@ function EditPanel({ position, onDone }: EditPanelProps) {
           </button>
         </div>
 
-        {/* ── Shared error + dismiss ───────────────────────────────── */}
-        {error && (
-          <span className="text-[10px] font-mono text-t-red self-center shrink-0">{error}</span>
-        )}
-        <button
-          onClick={onDone}
-          className="ml-auto text-t-muted hover:text-t-text text-xs self-center shrink-0 transition-colors"
-          title="Close editor"
-        >
-          ✕
-        </button>
+        {error && <span className="text-[10px] font-mono text-t-red self-center shrink-0">{error}</span>}
+        <button onClick={onDone} className="ml-auto text-t-muted hover:text-t-text text-xs self-center shrink-0 transition-colors" title="Close editor">✕</button>
       </div>
     </td>
   );
@@ -216,9 +182,9 @@ function EditPanel({ position, onDone }: EditPanelProps) {
 // ── PositionRow ───────────────────────────────────────────────────────────────
 
 interface PositionRowProps {
-  position:      Position;
-  isEditing:     boolean;
-  onToggleEdit:  () => void;
+  position:     Position;
+  isEditing:    boolean;
+  onToggleEdit: () => void;
 }
 
 function PositionRow({ position, isEditing, onToggleEdit }: PositionRowProps) {
@@ -232,14 +198,10 @@ function PositionRow({ position, isEditing, onToggleEdit }: PositionRowProps) {
       'transition-colors duration-75 group border-b border-t-border/40',
       isEditing ? 'bg-t-surface/40 border-b-0' : 'hover:bg-t-surface/30',
     ].join(' ')}>
-
-      {/* Symbol */}
       <td className="pl-4 pr-3 py-2 font-mono text-xs text-t-text whitespace-nowrap">
         <span className="font-semibold">{position.symbol.replace('USDT', '')}</span>
         <span className="text-t-muted">/USDT</span>
       </td>
-
-      {/* Side badge */}
       <td className="px-2 py-2 whitespace-nowrap">
         <span className={[
           'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider',
@@ -248,62 +210,28 @@ function PositionRow({ position, isEditing, onToggleEdit }: PositionRowProps) {
           {isBuy ? 'Long' : 'Short'}
         </span>
       </td>
-
-      {/* Size */}
-      <td className="px-3 py-2 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">
-        {fmtSize(position.size)}
-      </td>
-
-      {/* Entry + SL/TP sub-text */}
+      <td className="px-3 py-2 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">{fmtSize(position.size)}</td>
       <td className="px-3 py-2 whitespace-nowrap">
         <div className="flex flex-col gap-0.5">
-          <span className="font-mono text-xs text-t-sub tabular-nums">
-            {fmtPrice(position.entryPrice)}
-          </span>
+          <span className="font-mono text-xs text-t-sub tabular-nums">{fmtPrice(position.entryPrice)}</span>
           {(position.slPrice || position.tpPrice) && (
             <span className="font-mono text-[10px] tabular-nums leading-none">
-              {position.slPrice
-                ? <span className="text-t-red/70">SL {fmtPrice(position.slPrice)}</span>
-                : null}
-              {position.slPrice && position.tpPrice
-                ? <span className="text-t-muted/40"> · </span>
-                : null}
-              {position.tpPrice
-                ? <span className="text-t-green/70">TP {fmtPrice(position.tpPrice)}</span>
-                : null}
+              {position.slPrice ? <span className="text-t-red/70">SL {fmtPrice(position.slPrice)}</span> : null}
+              {position.slPrice && position.tpPrice ? <span className="text-t-muted/40"> · </span> : null}
+              {position.tpPrice ? <span className="text-t-green/70">TP {fmtPrice(position.tpPrice)}</span> : null}
             </span>
           )}
         </div>
       </td>
-
-      {/* Mark */}
-      <td className="px-3 py-2 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">
-        {fmtPrice(position.markPrice)}
-      </td>
-
-      {/* uPnL / ROE */}
+      <td className="px-3 py-2 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">{fmtPrice(position.markPrice)}</td>
       <td className="px-3 py-2 whitespace-nowrap">
         <div className="flex flex-col gap-0.5">
-          <span className={`font-mono text-xs tabular-nums ${pnlPositive ? 'text-t-green' : 'text-t-red'}`}>
-            {fmtPnl(position.unrealizedPnl)}
-          </span>
-          <span className={`font-mono text-[10px] tabular-nums ${pnlPositive ? 'text-t-green/60' : 'text-t-red/60'}`}>
-            {fmtRoe(roe)}
-          </span>
+          <span className={`font-mono text-xs tabular-nums ${pnlPositive ? 'text-t-green' : 'text-t-red'}`}>{fmtPnl(position.unrealizedPnl)}</span>
+          <span className={`font-mono text-[10px] tabular-nums ${pnlPositive ? 'text-t-green/60' : 'text-t-red/60'}`}>{fmtRoe(roe)}</span>
         </div>
       </td>
-
-      {/* Liq */}
-      <td className="px-3 py-2 font-mono text-xs text-t-muted tabular-nums whitespace-nowrap">
-        {fmtPrice(position.liquidationPrice)}
-      </td>
-
-      {/* Leverage */}
-      <td className="px-3 py-2 font-mono text-xs text-t-muted tabular-nums whitespace-nowrap">
-        {position.leverage}×
-      </td>
-
-      {/* Actions — visible on row hover, or always when editing */}
+      <td className="px-3 py-2 font-mono text-xs text-t-muted tabular-nums whitespace-nowrap">{fmtPrice(position.liquidationPrice)}</td>
+      <td className="px-3 py-2 font-mono text-xs text-t-muted tabular-nums whitespace-nowrap">{position.leverage}×</td>
       <td className="pr-4 py-2">
         <div className={[
           'flex items-center gap-1 transition-opacity duration-100',
@@ -334,98 +262,211 @@ function PositionRow({ position, isEditing, onToggleEdit }: PositionRowProps) {
   );
 }
 
+// ── HistoryRow ────────────────────────────────────────────────────────────────
+
+function HistoryRow({ trade }: { trade: ClosedTrade }) {
+  const isBuy     = trade.side === 'Buy';
+  const pnlPos    = trade.realizedPnl >= 0;
+  const direction = isBuy ? 'Long' : 'Short';
+
+  return (
+    <tr className="border-b border-t-border/30 last:border-0 hover:bg-t-surface/30 transition-colors duration-75">
+      <td className="pl-4 pr-3 py-2 font-mono text-[10px] text-t-muted tabular-nums whitespace-nowrap">
+        {timeAgo(trade.closedAt)}
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-t-text whitespace-nowrap">
+        <span className="font-semibold">{trade.symbol.replace('USDT', '')}</span>
+        <span className="text-t-muted">/USDT</span>
+      </td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        <span className={[
+          'px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-wider',
+          isBuy ? 'bg-t-green-dim text-t-green' : 'bg-t-red-dim text-t-red',
+        ].join(' ')}>
+          {direction}
+        </span>
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-t-sub tabular-nums whitespace-nowrap">{fmtSize(trade.size)}</td>
+      <td className="px-3 py-2 font-mono text-xs text-t-sub tabular-nums whitespace-nowrap">
+        {fmtPrice(trade.entryPrice)} → {fmtPrice(trade.exitPrice)}
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        <span className={`font-mono text-xs tabular-nums ${pnlPos ? 'text-t-green' : 'text-t-red'}`}>
+          {fmtPnl(trade.realizedPnl)}
+        </span>
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        {(trade.slPrice || trade.tpPrice) ? (
+          <span className="font-mono text-[10px] text-t-muted tabular-nums">
+            {trade.slPrice ? <span className="text-t-red/60">SL {fmtPrice(trade.slPrice)}</span> : null}
+            {trade.slPrice && trade.tpPrice ? <span className="text-t-muted/40"> · </span> : null}
+            {trade.tpPrice ? <span className="text-t-green/60">TP {fmtPrice(trade.tpPrice)}</span> : null}
+          </span>
+        ) : (
+          <span className="font-mono text-[10px] text-t-muted/30">—</span>
+        )}
+      </td>
+      <td className="pr-4 py-2">
+        {trade.isPartial && (
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-t-surface text-t-muted border border-t-border/50">
+            partial
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 // ── PositionsPanel ────────────────────────────────────────────────────────────
 
+type ActiveTab = 'positions' | 'orders' | 'history';
+
 export function PositionsPanel() {
-  const positions  = useTerminalStore((s) => s.positions);
-  const openOrders = useTerminalStore((s) => s.openOrders);
+  const positions    = useTerminalStore((s) => s.positions);
+  const openOrders   = useTerminalStore((s) => s.openOrders);
+  const tradeHistory = useTerminalStore((s) => s.tradeHistory);
 
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [activeTab,  setActiveTab]  = useState<ActiveTab>('positions');
+  const [editingId,  setEditingId]  = useState<string | null>(null);
 
-  // Clear editingId when the position being edited is removed (full close, etc.)
+  // Switch to Positions tab when a new position opens
   useEffect(() => {
-    if (editingId && !positions.find((p) => p.id === editingId)) {
-      setEditingId(null);
-    }
+    if (positions.length > 0 && activeTab === 'history') setActiveTab('positions');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positions.length]);
+
+  // Clear editingId when the position being edited is fully closed
+  useEffect(() => {
+    if (editingId && !positions.find((p) => p.id === editingId)) setEditingId(null);
   }, [positions, editingId]);
 
   function toggleEdit(id: string) {
     setEditingId((prev) => (prev === id ? null : id));
   }
 
+  const tabs: { id: ActiveTab; label: string; count?: number; accent?: boolean }[] = [
+    { id: 'positions', label: 'Positions', count: positions.length,   accent: positions.length > 0 },
+    { id: 'orders',    label: 'Orders',    count: openOrders.length },
+    { id: 'history',   label: 'History',   count: tradeHistory.length },
+  ];
+
   return (
     <section className="h-44 flex flex-col border-t border-t-border bg-t-panel shrink-0">
 
-      {/* ── Tabs ───────────────────────────────────────────────────── */}
+      {/* ── Tabs ─────────────────────────────────────────────────────── */}
       <div className="flex items-center border-b border-t-border shrink-0">
-        <div className={[
-          'flex items-center gap-2 px-4 py-2 border-r border-t-border border-b-2 -mb-px',
-          positions.length > 0 ? 'border-b-t-cyan' : 'border-b-transparent',
-        ].join(' ')}>
-          <span className="text-xs font-mono text-t-sub uppercase tracking-wider">Positions</span>
-          {positions.length > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] font-mono bg-t-cyan-dim text-t-cyan rounded border border-t-cyan/20">
-              {positions.length}
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={[
+              'flex items-center gap-2 px-4 py-2 border-r border-t-border border-b-2 -mb-px transition-colors',
+              activeTab === tab.id
+                ? tab.accent
+                  ? 'border-b-t-cyan'
+                  : 'border-b-t-sub'
+                : 'border-b-transparent hover:border-b-t-border-hi',
+            ].join(' ')}
+          >
+            <span className={`text-xs font-mono uppercase tracking-wider ${activeTab === tab.id ? 'text-t-sub' : 'text-t-muted'}`}>
+              {tab.label}
             </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 px-4 py-2 border-r border-t-border border-b-2 border-b-transparent -mb-px">
-          <span className="text-xs font-mono text-t-muted uppercase tracking-wider">Orders</span>
-          {openOrders.length > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] font-mono bg-t-surface text-t-muted rounded">
-              {openOrders.length}
-            </span>
-          )}
-        </div>
+            {tab.count !== undefined && tab.count > 0 && (
+              <span className={[
+                'px-1.5 py-0.5 text-[10px] font-mono rounded',
+                tab.accent && activeTab === tab.id
+                  ? 'bg-t-cyan-dim text-t-cyan border border-t-cyan/20'
+                  : 'bg-t-surface text-t-muted',
+              ].join(' ')}>
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
         <div className="flex-1" />
       </div>
 
-      {/* ── Content ────────────────────────────────────────────────── */}
+      {/* ── Content ──────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto min-h-0">
-        {positions.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <span className="text-xs font-mono text-t-muted">No open positions</span>
-          </div>
-        ) : (
-          <table className="w-full text-left min-w-max">
-            <thead className="sticky top-0 bg-t-panel z-10 border-b border-t-border">
-              <tr>
-                {['Symbol', 'Side', 'Size', 'Entry', 'Mark', 'uPnL / ROE', 'Liq.', 'Lev.', ''].map((h) => (
-                  <th
-                    key={h}
-                    className={[
+
+        {/* Positions tab */}
+        {activeTab === 'positions' && (
+          positions.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-xs font-mono text-t-muted">No open positions</span>
+            </div>
+          ) : (
+            <table className="w-full text-left min-w-max">
+              <thead className="sticky top-0 bg-t-panel z-10 border-b border-t-border">
+                <tr>
+                  {['Symbol', 'Side', 'Size', 'Entry', 'Mark', 'uPnL / ROE', 'Liq.', 'Lev.', ''].map((h) => (
+                    <th key={h} className={[
                       'py-1.5 text-[10px] font-mono text-t-muted font-normal whitespace-nowrap uppercase tracking-wider',
                       h === 'Symbol' ? 'pl-4 pr-3' : 'px-3',
                       h === '' ? 'pr-4' : '',
-                    ].join(' ')}
-                  >
-                    {h}
-                  </th>
+                    ].join(' ')}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((pos) => (
+                  <Fragment key={pos.id}>
+                    <PositionRow
+                      position={pos}
+                      isEditing={editingId === pos.id}
+                      onToggleEdit={() => toggleEdit(pos.id)}
+                    />
+                    {editingId === pos.id && (
+                      <tr className="bg-t-panel border-b border-t-border/40">
+                        <EditPanel key={pos.id} position={pos} onDone={() => setEditingId(null)} />
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {positions.map((pos) => (
-                <Fragment key={pos.id}>
-                  <PositionRow
-                    position={pos}
-                    isEditing={editingId === pos.id}
-                    onToggleEdit={() => toggleEdit(pos.id)}
-                  />
-                  {editingId === pos.id && (
-                    <tr className="bg-t-panel border-b border-t-border/40">
-                      <EditPanel
-                        key={pos.id}
-                        position={pos}
-                        onDone={() => setEditingId(null)}
-                      />
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          )
         )}
+
+        {/* Orders tab */}
+        {activeTab === 'orders' && (
+          <div className="flex items-center justify-center h-full">
+            <span className="text-xs font-mono text-t-muted">No open orders</span>
+          </div>
+        )}
+
+        {/* History tab */}
+        {activeTab === 'history' && (
+          tradeHistory.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-xs font-mono text-t-muted">No trade history yet</span>
+            </div>
+          ) : (
+            <table className="w-full text-left min-w-max">
+              <thead className="sticky top-0 bg-t-panel z-10 border-b border-t-border">
+                <tr>
+                  {['Time', 'Symbol', 'Side', 'Size', 'Entry → Exit', 'rPnL', 'SL / TP', ''].map((h) => (
+                    <th key={h} className={[
+                      'py-1.5 text-[10px] font-mono text-t-muted font-normal whitespace-nowrap uppercase tracking-wider',
+                      h === 'Time' ? 'pl-4 pr-3' : 'px-3',
+                      h === '' ? 'pr-4' : '',
+                    ].join(' ')}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tradeHistory.map((trade) => (
+                  <HistoryRow key={trade.id} trade={trade} />
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+
       </div>
     </section>
   );

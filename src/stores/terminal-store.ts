@@ -10,7 +10,7 @@ import type {
   SupportedSymbol,
 } from '@/lib/marketData';
 import { SUPPORTED_SYMBOLS } from '@/lib/marketData';
-import type { Order, Position } from '@/types/trading';
+import type { ClosedTrade, Order, Position } from '@/types/trading';
 
 // ---------------------------------------------------------------------------
 // State shape
@@ -48,6 +48,7 @@ interface TerminalState {
   // --- Trading ---
   positions: Position[];
   openOrders: Order[];
+  tradeHistory: ClosedTrade[];
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,9 @@ interface TerminalActions {
   upsertPosition: (position: Position) => void;
   closePosition: (positionId: string) => void;
 
+  // Trade history
+  addTrade: (trade: ClosedTrade) => void;
+
   // Orders
   upsertOrder: (order: Order) => void;
   cancelOrder: (orderId: string) => void;
@@ -92,6 +96,7 @@ const INITIAL: TerminalState = {
   connectionStatus: 'disconnected',
   positions: [],
   openOrders: [],
+  tradeHistory: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -170,6 +175,15 @@ export const useTerminalStore = create<TerminalState & TerminalActions>()(
           (s) => ({ positions: s.positions.filter((p) => p.id !== positionId) }),
           false,
           'closePosition',
+        ),
+
+      // --- Trade history ---
+
+      addTrade: (trade) =>
+        set(
+          (s) => ({ tradeHistory: [trade, ...s.tradeHistory] }),
+          false,
+          'addTrade',
         ),
 
       // --- Orders ---

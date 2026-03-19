@@ -196,6 +196,9 @@ function applyTickToSeries(
 
 export interface UseChartResult {
   containerRef:  React.RefObject<HTMLDivElement | null>;
+  /** Direct ref to the chart instance — used by interaction hooks to subscribe
+   *  to click/crosshair events without re-entering the chart lifecycle. */
+  chartRef:      React.RefObject<IChartApi | null>;
   /** Direct ref to the candlestick series — used by overlay hooks to attach
    *  price lines without re-entering the chart lifecycle. Read-only externally. */
   seriesRef:     React.RefObject<ISeriesApi<'Candlestick'> | null>;
@@ -320,5 +323,5 @@ export function useChart(
     setLastTickTime(Date.now());
   }, [latestTick]);
 
-  return { containerRef, seriesRef, isLoading, error, candleCount, lastTickTime };
+  return { containerRef, chartRef, seriesRef, isLoading, error, candleCount, lastTickTime };
 }
