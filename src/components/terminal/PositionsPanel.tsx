@@ -47,8 +47,17 @@ function PositionRow({ position }: { position: Position }) {
       <td className="px-3 py-2.5 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">
         {fmtSize(position.size)}
       </td>
-      <td className="px-3 py-2.5 font-mono text-xs text-t-sub tabular-nums whitespace-nowrap">
-        {fmtPrice(position.entryPrice)}
+      <td className="px-3 py-2.5 whitespace-nowrap">
+        <div className="flex flex-col gap-0.5">
+          <span className="font-mono text-xs text-t-sub tabular-nums">{fmtPrice(position.entryPrice)}</span>
+          {(position.slPrice || position.tpPrice) && (
+            <span className="font-mono text-[10px] tabular-nums text-t-muted leading-none">
+              {position.slPrice ? <span className="text-t-red/70">SL {fmtPrice(position.slPrice)}</span> : null}
+              {position.slPrice && position.tpPrice ? <span className="text-t-muted/50"> · </span> : null}
+              {position.tpPrice ? <span className="text-t-green/70">TP {fmtPrice(position.tpPrice)}</span> : null}
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-3 py-2.5 font-mono text-xs text-t-text tabular-nums whitespace-nowrap">
         {fmtPrice(position.markPrice)}

@@ -26,6 +26,10 @@ export interface Position {
   unrealizedPnl: number;
   /** Isolated-margin leverage, e.g. 10 = 10×. */
   leverage: number;
+  /** Optional stop-loss price set at order time. */
+  slPrice?: number;
+  /** Optional take-profit price set at order time. */
+  tpPrice?: number;
 }
 
 // ---------------------------------------------------------------------------

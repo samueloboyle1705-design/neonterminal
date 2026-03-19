@@ -131,6 +131,12 @@ export function placeMarketOrder(params: OpenOrderParams): PlaceOrderResult {
     liquidationPrice: calcLiquidationPrice(side, price, leverage),
     unrealizedPnl,
     leverage,
+    ...(params.slPrice && params.slPrice > 0
+      ? { slPrice: roundPrice(params.slPrice, symbol) }
+      : {}),
+    ...(params.tpPrice && params.tpPrice > 0
+      ? { tpPrice: roundPrice(params.tpPrice, symbol) }
+      : {}),
   };
 
   // Deduct margin from free balance

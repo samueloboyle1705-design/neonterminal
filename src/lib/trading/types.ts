@@ -20,6 +20,10 @@ export interface OpenOrderParams {
   leverage: number;
   /** Execution price — mark price at time of submission. */
   markPrice: number;
+  /** Optional stop-loss price (validated before reaching simulator). */
+  slPrice?: number;
+  /** Optional take-profit price (validated before reaching simulator). */
+  tpPrice?: number;
 }
 
 export type PlaceOrderResult =
