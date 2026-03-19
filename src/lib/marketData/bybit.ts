@@ -1,4 +1,4 @@
-import type { Candle, ConnectionStatus, MarketTick, Timeframe } from './types';
+import type { Candle, ConnectionStatus, DisplayTimeframe, MarketTick } from './types';
 import type { MarketDataProvider } from './provider';
 import type { BybitRawTicker, BybitTickerEnvelope } from './normalize';
 import { fetchCandles } from './candles';
@@ -14,7 +14,7 @@ import { BybitStream } from './stream';
  *
  * Usage:
  *   const provider = new BybitProvider();
- *   const candles  = await provider.getCandles('BTCUSDT', '15', 200);
+ *   const candles  = await provider.getCandles('BTCUSDT', '15m', 200);
  *   const unsub    = provider.subscribeTicker(['BTCUSDT', 'ETHUSDT'], tick => console.log(tick));
  *   // later:
  *   unsub();
@@ -31,7 +31,7 @@ export class BybitProvider implements MarketDataProvider {
   // REST — candles
   // -------------------------------------------------------------------------
 
-  getCandles(symbol: string, timeframe: Timeframe, limit: number): Promise<Candle[]> {
+  getCandles(symbol: string, timeframe: DisplayTimeframe, limit: number): Promise<Candle[]> {
     return fetchCandles(symbol, timeframe, limit);
   }
 

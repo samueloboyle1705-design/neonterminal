@@ -5,7 +5,8 @@ import type { Candle, MarketTick } from './types';
 // ---------------------------------------------------------------------------
 
 /**
- * Bybit v5 kline list item.
+ * Bybit v5 kline list item shape (informational — actual parsing uses
+ * unknown[] so callers do not need to pre-cast before calling normalizeCandle).
  * [startTime, open, high, low, close, volume, turnover]
  */
 export type BybitKlineItem = [
@@ -52,16 +53,45 @@ export interface BybitTickerEnvelope {
 // Normalizers
 // ---------------------------------------------------------------------------
 
-/** Convert a raw Bybit kline array into a shared Candle. */
-export function normalizeCandle(item: BybitKlineItem): Candle {
+/**
+ * Convert a raw Bybit kline array into a shared Candle.
+ *
+ * Returns `null` if the item is structurally wrong or contains non-finite
+ * values for any price field (NaN / Infinity).  Volume defaults to 0 if
+ * missing or non-finite — a missing volume is recoverable, a missing price
+ * is not.
+ */
+export function normalizeCandle(item: unknown): Candle | null {
+  // Guard: must be an array with at least 6 elements.
+  if (!Array.isArray(item) || item.length < 6) return null;
+
+  const time = Math.floor(Number(item[0]) / 1000);
+  const open = Number(item[1]);
+  const high = Number(item[2]);
+  const low = Number(item[3]);
+  const close = Number(item[4]);
+  const volume = Number(item[5]);
+
+  // A non-positive or non-finite timestamp means the candle is unusable.
+  if (!Number.isFinite(time) || time <= 0) return null;
+
+  // Price fields must all be finite numbers.
+  if (
+    !Number.isFinite(open) ||
+    !Number.isFinite(high) ||
+    !Number.isFinite(low) ||
+    !Number.isFinite(close)
+  ) {
+    return null;
+  }
+
   return {
-    // Bybit timestamps are epoch ms; lightweight-charts wants epoch seconds.
-    time: Math.floor(Number(item[0]) / 1000),
-    open: Number(item[1]),
-    high: Number(item[2]),
-    low: Number(item[3]),
-    close: Number(item[4]),
-    volume: Number(item[5]),
+    time,
+    open,
+    high,
+    low,
+    close,
+    volume: Number.isFinite(volume) ? volume : 0,
   };
 }
 

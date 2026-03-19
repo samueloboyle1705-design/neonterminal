@@ -1,4 +1,4 @@
-import type { Candle, ConnectionStatus, MarketTick, Timeframe } from './types';
+import type { Candle, ConnectionStatus, DisplayTimeframe, MarketTick } from './types';
 
 /**
  * Uniform interface for any market-data backend.
@@ -7,9 +7,17 @@ import type { Candle, ConnectionStatus, MarketTick, Timeframe } from './types';
 export interface MarketDataProvider {
   /**
    * Fetch historical candles for a symbol.
-   * Returns candles sorted oldest → newest (ready for lightweight-charts).
+   *
+   * @param symbol    Instrument name, e.g. "BTCUSDT"
+   * @param timeframe UI display timeframe, e.g. "1h"
+   * @param limit     Number of candles (provider may cap this)
+   * @returns         Candles sorted oldest → newest, ready for lightweight-charts
    */
-  getCandles(symbol: string, timeframe: Timeframe, limit: number): Promise<Candle[]>;
+  getCandles(
+    symbol: string,
+    timeframe: DisplayTimeframe,
+    limit: number,
+  ): Promise<Candle[]>;
 
   /**
    * Subscribe to real-time ticker updates for one or more symbols.
