@@ -26,10 +26,45 @@ export interface Position {
   unrealizedPnl: number;
   /** Isolated-margin leverage, e.g. 10 = 10×. */
   leverage: number;
+  /** Unix-ms timestamp when the position was opened. */
+  openedAt: number;
   /** Optional stop-loss price set at order time. */
   slPrice?: number;
   /** Optional take-profit price set at order time. */
   tpPrice?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Closed Trade (trade history record)
+// ---------------------------------------------------------------------------
+
+/**
+ * Immutable record written each time a position (or portion of one) is closed.
+ * Used to build trade history, win/loss stats, and account attribution.
+ */
+export interface ClosedTrade {
+  /** Unique record ID (generated at close time). */
+  id: string;
+  /** The position this close belongs to. */
+  positionId: string;
+  symbol: string;
+  side: TradeSide;
+  /** Unix-ms when the position was originally opened. */
+  openedAt: number;
+  /** Unix-ms when this close happened. */
+  closedAt: number;
+  entryPrice: number;
+  /** Mark price at the moment of close. */
+  exitPrice: number;
+  /** Quantity closed in this record (may be < full position for partial closes). */
+  size: number;
+  realizedPnl: number;
+  /** SL set on the position at close time (for record keeping). */
+  slPrice?: number;
+  /** TP set on the position at close time. */
+  tpPrice?: number;
+  /** True when only part of the position was closed. */
+  isPartial: boolean;
 }
 
 // ---------------------------------------------------------------------------

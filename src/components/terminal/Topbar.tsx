@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useTerminalStore, selectCurrentPrice } from '@/stores/terminal-store';
 import { useAccountStore } from '@/stores/account-store';
 import type { ConnectionStatus } from '@/lib/marketData';
@@ -82,10 +83,25 @@ export function Topbar() {
   const connectionStatus = useTerminalStore((s) => s.connectionStatus);
   const currentTick = useTerminalStore(selectCurrentPrice);
 
-  const balance = useAccountStore((s) => s.balance);
-  const equity = useAccountStore((s) => s.equity);
+  const balance       = useAccountStore((s) => s.balance);
+  const equity        = useAccountStore((s) => s.equity);
   const unrealizedPnl = useAccountStore((s) => s.unrealizedPnl);
-  const realizedPnl = useAccountStore((s) => s.realizedPnl);
+  const realizedPnl   = useAccountStore((s) => s.realizedPnl);
+
+  // Open exposure: Σ(size × markPrice) — re-reads on every position tick
+  const positions    = useTerminalStore((s) => s.positions);
+  const tradeHistory = useTerminalStore((s) => s.tradeHistory);
+
+  const exposure = useMemo(
+    () => positions.reduce((sum, p) => sum + p.size * p.markPrice, 0),
+    [positions],
+  );
+
+  const tradeStats = useMemo(() => {
+    if (tradeHistory.length === 0) return null;
+    const wins = tradeHistory.filter((t) => t.realizedPnl > 0).length;
+    return { wins, total: tradeHistory.length };
+  }, [tradeHistory]);
 
   const price = currentTick?.lastPrice ?? 0;
   const markPrice = currentTick?.markPrice ?? 0;
@@ -189,6 +205,22 @@ export function Topbar() {
               value={fmtPnl(realizedPnl)}
               valueClass={realizedPnl >= 0 ? 'text-t-green' : 'text-t-red'}
             />
+            {exposure > 0 && (
+              <>
+                <VDivider />
+                <AccountMetric label="Exposure" value={fmtUsdt(exposure)} valueClass="text-t-sub" />
+              </>
+            )}
+            {tradeStats && (
+              <>
+                <VDivider />
+                <AccountMetric
+                  label="Win rate"
+                  value={`${tradeStats.wins}/${tradeStats.total}`}
+                  valueClass={tradeStats.wins / tradeStats.total >= 0.5 ? 'text-t-green' : 'text-t-red'}
+                />
+              </>
+            )}
             <VDivider />
           </>
         )}

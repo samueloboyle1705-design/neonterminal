@@ -22,7 +22,7 @@
 
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useAccountStore } from '@/stores/account-store';
-import type { Position } from '@/types/trading';
+import type { ClosedTrade, Position } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice, calcMargin } from './pnl';
 import { roundSize, roundPrice, minSize } from './precision';
 import { validateSlTp } from './risk';
@@ -132,6 +132,7 @@ export function placeMarketOrder(params: OpenOrderParams): PlaceOrderResult {
     liquidationPrice: calcLiquidationPrice(side, price, leverage),
     unrealizedPnl,
     leverage,
+    openedAt: Date.now(),
     ...(params.slPrice && params.slPrice > 0
       ? { slPrice: roundPrice(params.slPrice, symbol) }
       : {}),
@@ -170,9 +171,26 @@ export function closeSimulatedPosition(
   const margin = calcMargin(position.size, position.entryPrice, position.leverage);
   const returned = margin + realizedPnl;
 
+  const trade: ClosedTrade = {
+    id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    positionId: position.id,
+    symbol: position.symbol,
+    side: position.side,
+    openedAt: position.openedAt,
+    closedAt: Date.now(),
+    entryPrice: position.entryPrice,
+    exitPrice: markPrice,
+    size: position.size,
+    realizedPnl,
+    slPrice: position.slPrice,
+    tpPrice: position.tpPrice,
+    isPartial: false,
+  };
+
   useAccountStore.getState().setBalance(balance + returned);
   useAccountStore.getState().addRealizedPnl(realizedPnl);
   useTerminalStore.getState().closePosition(positionId);
+  useTerminalStore.getState().addTrade(trade);
   syncEquity();
 
   return { ok: true, realizedPnl };
@@ -264,9 +282,26 @@ export function partialClosePosition(
     unrealizedPnl: remainingPnl,
   };
 
+  const trade: ClosedTrade = {
+    id: `trade-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    positionId: position.id,
+    symbol: position.symbol,
+    side: position.side,
+    openedAt: position.openedAt,
+    closedAt: Date.now(),
+    entryPrice: position.entryPrice,
+    exitPrice: markPrice,
+    size: rounded,
+    realizedPnl,
+    slPrice: position.slPrice,
+    tpPrice: position.tpPrice,
+    isPartial: true,
+  };
+
   useAccountStore.getState().setBalance(balance + returned);
   useAccountStore.getState().addRealizedPnl(realizedPnl);
   useTerminalStore.getState().upsertPosition(updated);
+  useTerminalStore.getState().addTrade(trade);
   syncEquity();
 
   return { ok: true, realizedPnl };

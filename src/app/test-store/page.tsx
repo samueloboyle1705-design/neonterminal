@@ -86,6 +86,7 @@ const MOCK_POSITIONS: Position[] = [
     liquidationPrice: 58000,
     unrealizedPnl: 220,
     leverage: 10,
+    openedAt: Date.now(),
   },
   {
     id: 'ETHUSDT-Sell',
@@ -97,6 +98,7 @@ const MOCK_POSITIONS: Position[] = [
     liquidationPrice: 3520,
     unrealizedPnl: 20,
     leverage: 5,
+    openedAt: Date.now(),
   },
 ];
 
