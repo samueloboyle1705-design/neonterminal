@@ -99,6 +99,10 @@ const CANDLE_OPTIONS: CandlestickSeriesPartialOptions = {
   borderDownColor: C.red,
   wickUpColor:     C.green,
   wickDownColor:   C.red,
+  // Show the built-in last-price line as a subtle mark-price reference
+  priceLineVisible: true,
+  priceLineColor:   C.borderHi,
+  priceLineWidth:   1,
 };
 
 // How many candles to fetch per request (Bybit cap is 1 000)
@@ -192,6 +196,9 @@ function applyTickToSeries(
 
 export interface UseChartResult {
   containerRef:  React.RefObject<HTMLDivElement | null>;
+  /** Direct ref to the candlestick series — used by overlay hooks to attach
+   *  price lines without re-entering the chart lifecycle. Read-only externally. */
+  seriesRef:     React.RefObject<ISeriesApi<'Candlestick'> | null>;
   isLoading:     boolean;
   error:         string | null;
   candleCount:   number;
@@ -313,5 +320,5 @@ export function useChart(
     setLastTickTime(Date.now());
   }, [latestTick]);
 
-  return { containerRef, isLoading, error, candleCount, lastTickTime };
+  return { containerRef, seriesRef, isLoading, error, candleCount, lastTickTime };
 }
