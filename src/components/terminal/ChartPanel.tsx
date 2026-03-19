@@ -3,19 +3,29 @@
 import { useEffect, useState } from 'react';
 import { useTerminalStore } from '@/stores/terminal-store';
 import { useChart } from '@/hooks/useChart';
+import { useTradeOverlays } from '@/hooks/useTradeOverlays';
 
 export function ChartPanel() {
   const selectedSymbol    = useTerminalStore((s) => s.selectedSymbol);
   const selectedTimeframe = useTerminalStore((s) => s.selectedTimeframe);
   const setCandlesLoading = useTerminalStore((s) => s.setCandlesLoading);
 
+  // Latest tick for this symbol — drives both candle patching and overlay PnL updates
   const latestTick = useTerminalStore((s) => s.livePrices[selectedSymbol] ?? null);
 
-  const { containerRef, isLoading, error, candleCount, lastTickTime } = useChart(
+  // Positions for the currently viewed symbol — used by overlay hook
+  const symbolPositions = useTerminalStore((s) =>
+    s.positions.filter((p) => p.symbol === selectedSymbol),
+  );
+
+  const { containerRef, seriesRef, isLoading, error, candleCount, lastTickTime } = useChart(
     selectedSymbol,
     selectedTimeframe,
     latestTick,
   );
+
+  // Wire trade-entry overlays onto the chart series
+  useTradeOverlays(seriesRef, symbolPositions, latestTick?.markPrice ?? 0);
 
   // Keep store in sync with loading state
   useEffect(() => {
@@ -30,6 +40,8 @@ export function ChartPanel() {
     const id = setTimeout(() => setIsLive(false), 5_000);
     return () => clearTimeout(id);
   }, [lastTickTime]);
+
+  const hasPositions = symbolPositions.length > 0;
 
   return (
     <div className="flex-1 relative bg-t-bg overflow-hidden min-h-0">
@@ -46,21 +58,30 @@ export function ChartPanel() {
         </span>
       </div>
 
-      {/* top-right: LIVE indicator */}
-      {isLive && (
-        <div className="absolute top-3 right-4 flex items-center gap-1.5 pointer-events-none z-10">
-          <span className="block w-1.5 h-1.5 rounded-full bg-t-cyan animate-pulse" />
-          <span className="text-[10px] font-mono text-t-cyan uppercase tracking-[0.15em] select-none">
-            Live
-          </span>
-        </div>
-      )}
+      {/* top-right: LIVE indicator + position count badge */}
+      <div className="absolute top-3 right-4 flex items-center gap-3 pointer-events-none z-10">
+        {hasPositions && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono text-t-cyan select-none">
+              {symbolPositions.length} position{symbolPositions.length > 1 ? 's' : ''}
+            </span>
+          </div>
+        )}
+        {isLive && (
+          <div className="flex items-center gap-1.5">
+            <span className="block w-1.5 h-1.5 rounded-full bg-t-cyan animate-pulse" />
+            <span className="text-[10px] font-mono text-t-cyan uppercase tracking-[0.15em] select-none">
+              Live
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* loading overlay */}
       {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center bg-t-bg/70 z-20 pointer-events-none">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-5 h-5 border-2 border-t-border border-t-top-cyan rounded-full animate-spin"
+            <div className="w-5 h-5 border-2 border-t-border rounded-full animate-spin"
               style={{ borderTopColor: '#22d3ee' }} />
             <span className="text-xs font-mono text-t-sub">
               Loading {selectedSymbol} {selectedTimeframe}…
