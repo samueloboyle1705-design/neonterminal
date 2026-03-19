@@ -1,6 +1,13 @@
 /**
- * Supported Bybit/TradingView timeframes.
+ * Human-readable timeframe labels used throughout the UI.
+ * These are mapped to Bybit interval strings internally.
+ */
+export type DisplayTimeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+
+/**
+ * Raw Bybit v5 interval strings.
  * Numeric strings are minutes; D/W/M are day/week/month.
+ * Kept for internal use and for callers that query Bybit directly.
  */
 export type Timeframe =
   | '1'
@@ -16,6 +23,10 @@ export type Timeframe =
   | 'D'
   | 'W'
   | 'M';
+
+/** Symbols explicitly supported and tested by this app. */
+export const SUPPORTED_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
+export type SupportedSymbol = (typeof SUPPORTED_SYMBOLS)[number];
 
 /** A single OHLCV candle, time in Unix seconds (matches lightweight-charts). */
 export interface Candle {
