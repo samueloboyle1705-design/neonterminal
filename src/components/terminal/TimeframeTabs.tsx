@@ -11,10 +11,7 @@ export function TimeframeTabs() {
   const setSelectedTimeframe = useTerminalStore((s) => s.setSelectedTimeframe);
 
   return (
-    <div className="h-9 flex items-center gap-0.5 px-3 border-b border-t-border bg-t-panel shrink-0">
-      <span className="text-xs font-mono text-t-muted uppercase tracking-widest pr-3">
-        TF
-      </span>
+    <div className="h-9 flex items-stretch gap-0 px-3 border-b border-t-border bg-t-panel shrink-0">
       {TIMEFRAMES.map((tf) => {
         const isActive = tf === selectedTimeframe;
         return (
@@ -22,13 +19,17 @@ export function TimeframeTabs() {
             key={tf}
             onClick={() => setSelectedTimeframe(tf)}
             className={[
-              'px-2.5 py-1 text-xs font-mono rounded-sm transition-colors duration-100',
+              'relative px-3 text-xs font-mono transition-colors duration-100',
+              'flex items-center',
               isActive
-                ? 'bg-t-surface text-t-green'
-                : 'text-t-sub hover:text-t-text hover:bg-t-surface',
+                ? 'text-t-cyan'
+                : 'text-t-muted hover:text-t-sub',
             ].join(' ')}
           >
             {tf}
+            {isActive && (
+              <span className="absolute bottom-0 left-0 right-0 h-px bg-t-cyan" />
+            )}
           </button>
         );
       })}
