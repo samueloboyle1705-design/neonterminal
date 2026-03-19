@@ -4,10 +4,9 @@ import { useTerminalStore } from '@/stores/terminal-store';
 import type { SupportedSymbol } from '@/lib/marketData';
 
 function fmtPrice(n: number): string {
-  // Use enough decimals for small-cap prices (SOL), not too many for BTC
-  if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-  if (n >= 10) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return n.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 4 });
+  if (n >= 10_000) return n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  if (n >= 100) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
 function fmtPct(n: number): string {
@@ -15,7 +14,6 @@ function fmtPct(n: number): string {
   return `${sign}${(n * 100).toFixed(2)}%`;
 }
 
-// Strip "USDT" suffix for compact display
 function shortSym(sym: string): string {
   return sym.replace('USDT', '');
 }
@@ -27,11 +25,11 @@ export function Watchlist() {
   const setSelectedSymbol = useTerminalStore((s) => s.setSelectedSymbol);
 
   return (
-    <aside className="w-48 flex flex-col border-r border-t-border bg-t-panel shrink-0 overflow-hidden">
+    <aside className="w-44 flex flex-col border-r border-t-border bg-t-panel shrink-0 overflow-hidden">
       {/* Header */}
-      <div className="px-3 pt-3 pb-2 border-b border-t-border">
-        <span className="text-xs font-mono text-t-muted uppercase tracking-widest">
-          Watchlist
+      <div className="px-3 py-2.5 border-b border-t-border">
+        <span className="text-[10px] font-mono text-t-muted uppercase tracking-[0.15em]">
+          Markets
         </span>
       </div>
 
@@ -48,38 +46,29 @@ export function Watchlist() {
               key={sym}
               onClick={() => setSelectedSymbol(sym as SupportedSymbol)}
               className={[
-                'w-full flex items-center justify-between px-3 py-2.5 text-left',
-                'border-l-2 transition-colors duration-100',
-                'hover:bg-t-surface',
+                'w-full flex items-center justify-between px-3 py-3 text-left',
+                'border-l-2 transition-all duration-100',
                 isSelected
-                  ? 'bg-t-surface border-t-green'
-                  : 'border-transparent',
+                  ? 'bg-t-surface border-t-cyan'
+                  : 'border-transparent hover:bg-t-surface/50 hover:border-t-border',
               ].join(' ')}
             >
               {/* Left: symbol name */}
-              <div className="flex flex-col gap-0.5">
-                <span
-                  className={`text-xs font-mono font-semibold ${
-                    isSelected ? 'text-t-green' : 'text-t-text'
-                  }`}
-                >
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className={`text-xs font-mono font-semibold leading-none ${isSelected ? 'text-t-cyan' : 'text-t-text'}`}>
                   {shortSym(sym)}
                 </span>
-                <span className="text-xs font-mono text-t-muted">USDT·PERP</span>
+                <span className="text-[10px] font-mono text-t-muted leading-none">USDT PERP</span>
               </div>
 
               {/* Right: price + pct */}
-              <div className="flex flex-col items-end gap-0.5">
+              <div className="flex flex-col items-end gap-1 min-w-0 ml-1">
                 {tick ? (
                   <>
-                    <span className="text-xs font-mono text-t-text tabular-nums">
+                    <span className="text-xs font-mono text-t-text tabular-nums leading-none">
                       {fmtPrice(tick.lastPrice)}
                     </span>
-                    <span
-                      className={`text-xs font-mono tabular-nums ${
-                        priceUp ? 'text-t-green' : 'text-t-red'
-                      }`}
-                    >
+                    <span className={`text-[10px] font-mono tabular-nums leading-none ${priceUp ? 'text-t-green' : 'text-t-red'}`}>
                       {fmtPct(pct)}
                     </span>
                   </>
@@ -92,10 +81,10 @@ export function Watchlist() {
         })}
       </div>
 
-      {/* Footer: funding rate or volume could go here later */}
+      {/* Footer */}
       <div className="px-3 py-2 border-t border-t-border">
-        <span className="text-xs font-mono text-t-muted">
-          {watchlist.length} symbols
+        <span className="text-[10px] font-mono text-t-muted">
+          {watchlist.length} pairs
         </span>
       </div>
     </aside>

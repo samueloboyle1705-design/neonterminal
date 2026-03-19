@@ -2,8 +2,8 @@
 
 /* ── Base CSS variables ─────────────────────────────────────────────────── */
 :root {
-  --background: #090b0e;
-  --foreground: #dde2ed;
+  --background: #080b10;
+  --foreground: #e4e9f5;
 }
 
 /* ── Tailwind theme tokens ──────────────────────────────────────────────── */
@@ -15,36 +15,39 @@
 }
 
 /*
- * Terminal color palette.
+ * Terminal color palette — Neon dark exchange aesthetic.
  * All tokens start with `t-` to avoid collisions with Tailwind defaults.
  * Usage: bg-t-bg, text-t-green, border-t-border, etc.
  */
 @theme {
   /* Backgrounds — deepest to lightest */
-  --color-t-bg:       #090b0e;
-  --color-t-panel:    #0d1117;
-  --color-t-surface:  #111823;
-  --color-t-overlay:  #19243a;
+  --color-t-bg:       #080b10;
+  --color-t-panel:    #0b0f17;
+  --color-t-surface:  #0f1520;
+  --color-t-overlay:  #152030;
 
   /* Borders */
-  --color-t-border:    #1c2638;
-  --color-t-border-hi: #2a3850;
+  --color-t-border:    #1a2535;
+  --color-t-border-hi: #243448;
 
   /* Text */
-  --color-t-text:   #dde2ed;
-  --color-t-sub:    #7d8a9e;
-  --color-t-muted:  #3f4d62;
+  --color-t-text:   #e4e9f5;
+  --color-t-sub:    #8895ab;
+  --color-t-muted:  #3d4f66;
 
   /* Semantic — trading signals */
-  --color-t-green:  #00d97e;
-  --color-t-red:    #f63d68;
+  --color-t-green:  #00e887;
+  --color-t-red:    #ff3b5c;
   --color-t-amber:  #f59e0b;
-  --color-t-blue:   #60a5fa;
+  --color-t-blue:   #3b9eff;
+  --color-t-cyan:   #22d3ee;
   --color-t-accent: #7c6af7;
 
-  /* Semantic — faded variants for backgrounds */
-  --color-t-green-dim: #001f12;
-  --color-t-red-dim:   #200813;
+  /* Semantic — faded bg variants */
+  --color-t-green-dim:  #00160a;
+  --color-t-red-dim:    #1a040e;
+  --color-t-cyan-dim:   #051318;
+  --color-t-accent-dim: #1c1940;
 }
 
 /* ── Global resets for the terminal ────────────────────────────────────── */
@@ -61,9 +64,9 @@ body {
 /* Thin, dark scrollbars for panels that overflow */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #1c2638 transparent;
+  scrollbar-color: #1a2535 transparent;
 }
 *::-webkit-scrollbar { width: 4px; height: 4px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: #1c2638; border-radius: 2px; }
-*::-webkit-scrollbar-thumb:hover { background: #2a3850; }
+*::-webkit-scrollbar-thumb { background: #1a2535; border-radius: 2px; }
+*::-webkit-scrollbar-thumb:hover { background: #243448; }

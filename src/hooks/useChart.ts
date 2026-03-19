@@ -43,16 +43,16 @@ import type { Candle, DisplayTimeframe, MarketTick } from '@/lib/marketData';
 // ── Theme constants — must match globals.css @theme values ──────────────────
 
 const C = {
-  bg:       '#090b0e',
-  panel:    '#0d1117',
-  surface:  '#111823',
-  border:   '#1c2638',
-  borderHi: '#2a3850',
-  text:     '#dde2ed',
-  sub:      '#7d8a9e',
-  muted:    '#3f4d62',
-  green:    '#00d97e',
-  red:      '#f63d68',
+  bg:       '#080b10',
+  panel:    '#0b0f17',
+  surface:  '#0f1520',
+  border:   '#1a2535',
+  borderHi: '#243448',
+  text:     '#e4e9f5',
+  sub:      '#8895ab',
+  muted:    '#3d4f66',
+  green:    '#00e887',
+  red:      '#ff3b5c',
 } as const;
 
 // ── Chart + series options ───────────────────────────────────────────────────
