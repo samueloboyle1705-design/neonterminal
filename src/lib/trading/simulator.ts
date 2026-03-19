@@ -25,8 +25,9 @@ import { useAccountStore } from '@/stores/account-store';
 import type { Position } from '@/types/trading';
 import { calcUnrealizedPnl, calcLiquidationPrice, calcMargin } from './pnl';
 import { roundSize, roundPrice, minSize } from './precision';
+import { validateSlTp } from './risk';
 import { INITIAL_BALANCE } from './types';
-import type { OpenOrderParams, PlaceOrderResult, ClosePositionResult } from './types';
+import type { OpenOrderParams, PlaceOrderResult, ClosePositionResult, SimpleResult } from './types';
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -172,6 +173,100 @@ export function closeSimulatedPosition(
   useAccountStore.getState().setBalance(balance + returned);
   useAccountStore.getState().addRealizedPnl(realizedPnl);
   useTerminalStore.getState().closePosition(positionId);
+  syncEquity();
+
+  return { ok: true, realizedPnl };
+}
+
+/**
+ * Update the SL and/or TP on an open position.
+ * Pass null to clear a level.  Validates long/short direction before persisting.
+ */
+export function updatePositionSlTp(
+  positionId: string,
+  slPrice: number | null,
+  tpPrice: number | null,
+): SimpleResult {
+  const { positions } = useTerminalStore.getState();
+  const position = positions.find((p) => p.id === positionId);
+  if (!position) return { ok: false, error: 'Position not found' };
+
+  const { slError, tpError } = validateSlTp(
+    position.side,
+    position.entryPrice,
+    slPrice,
+    tpPrice,
+  );
+  if (slError) return { ok: false, error: slError };
+  if (tpError) return { ok: false, error: tpError };
+
+  const updated: Position = {
+    ...position,
+    slPrice: slPrice && slPrice > 0 ? roundPrice(slPrice, position.symbol) : undefined,
+    tpPrice: tpPrice && tpPrice > 0 ? roundPrice(tpPrice, position.symbol) : undefined,
+  };
+  useTerminalStore.getState().upsertPosition(updated);
+  return { ok: true };
+}
+
+/**
+ * Partially close an open position at the given mark price.
+ *
+ * If closeSize >= position.size the call is forwarded to closeSimulatedPosition
+ * (full close).  Otherwise:
+ *  - Realizes PnL proportional to the closed fraction.
+ *  - Returns (closedMargin + realizedPnl) to free balance.
+ *  - Reduces position size; SL/TP are preserved on the remainder.
+ */
+export function partialClosePosition(
+  positionId: string,
+  closeSize: number,
+  markPrice: number,
+): ClosePositionResult {
+  const { positions, balance } = _getState();
+  const position = positions.find((p) => p.id === positionId);
+  if (!position) return { ok: false, error: 'Position not found' };
+
+  const rounded = roundSize(closeSize, position.symbol);
+  if (rounded <= 0) return { ok: false, error: 'Invalid close size' };
+
+  // Delegate to full close when the amount covers the whole position
+  if (rounded >= position.size) {
+    return closeSimulatedPosition(positionId, markPrice);
+  }
+
+  const realizedPnl = calcUnrealizedPnl(
+    position.side,
+    rounded,
+    position.entryPrice,
+    markPrice,
+  );
+  const closedMargin = calcMargin(rounded, position.entryPrice, position.leverage);
+  const returned = closedMargin + realizedPnl;
+
+  const remainingSize = roundSize(position.size - rounded, position.symbol);
+  // Edge case: rounding collapses remainder to 0 — treat as full close
+  if (remainingSize <= 0) {
+    return closeSimulatedPosition(positionId, markPrice);
+  }
+
+  const remainingPnl = calcUnrealizedPnl(
+    position.side,
+    remainingSize,
+    position.entryPrice,
+    markPrice,
+  );
+
+  const updated: Position = {
+    ...position,
+    size: remainingSize,
+    markPrice,
+    unrealizedPnl: remainingPnl,
+  };
+
+  useAccountStore.getState().setBalance(balance + returned);
+  useAccountStore.getState().addRealizedPnl(realizedPnl);
+  useTerminalStore.getState().upsertPosition(updated);
   syncEquity();
 
   return { ok: true, realizedPnl };

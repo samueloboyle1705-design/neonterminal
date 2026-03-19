@@ -33,3 +33,6 @@ export type PlaceOrderResult =
 export type ClosePositionResult =
   | { ok: true; realizedPnl: number }
   | { ok: false; error: string };
+
+/** Generic success/error result with no extra payload. */
+export type SimpleResult = { ok: true } | { ok: false; error: string };
